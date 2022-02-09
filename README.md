@@ -1,1 +1,1 @@
-# CoMPASS
+* COMPY
