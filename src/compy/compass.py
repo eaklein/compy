@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 Created on Tue Oct 26 11:46:40 2021
-
-@author: Avram
+@author: E. A. Klein
 """
 
 import os
 from bisect import bisect_left
 from copy import deepcopy
+import struct
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -101,7 +101,14 @@ class CompassRun:
                 ['configuration']
                 ['acquisitionMemento']
                 ['timedRunDuration']
-                )/1000/60
+                )
+            self.settings['t_meas'] /= 1000*60
+            self.settings['file_format'] = (
+                settings_xml
+                ['configuration']
+                ['acquisitionMemento']
+                ['fileFormatList']
+                )
         except FileNotFoundError:
             verboseprint(
                 f'WARNING: Settings file could not be found for {self.key} '
@@ -119,10 +126,12 @@ class CompassRun:
         ))
         self.params['TOF']['t_lo'] = float(
             self.settings['SW_PARAMETER_TIME_DIFFERENCE_CH_T0']
-        )/1000
+        )
+        self.params['TOF']['t_lo'] /= 1000  # convert to us
         self.params['TOF']['t_hi'] = float(
             self.settings['SW_PARAMETER_TIME_DIFFERENCE_CH_T1']
-        )/1000
+        )
+        self.params['TOF']['t_hi'] /= 1000  # convert to us
         # read parameters for energy spectra
         self.params['E'] = {}
         self.params['E']['n_bins'] = int(
@@ -134,6 +143,7 @@ class CompassRun:
             self.settings['SW_PARAMETER_PSDBINCOUNT']
         ))
         # read files from run directory
+        file_fmt = '.' + self.settings['file_format'].lower()
         for filt_key in ['unfiltered', 'filtered']:
             filt_upper = filt_key.upper()
             self.params[filt_key] = {}
@@ -142,19 +152,18 @@ class CompassRun:
                 os.listdir(folder_filt)
             except WindowsError:
                 print(
-                    f'WARNING: Couldnt find {filt_upper} folder for {self.key}.'
+                    f'WARNING: Cannot find {filt_upper} folder for {self.key}.'
                 )
                 break
-
             # read raw CH0 data location
             self.params[filt_key]['file_CH0'] = [
                 file for file in os.listdir(folder_filt)
-                if file.endswith(".csv") and ('CH0' in file)
+                if file.endswith(file_fmt) and ('CH0' in file)
             ]
             # read raw CH1 data location
             self.params[filt_key]['file_CH1'] = [
                 file for file in os.listdir(folder_filt)
-                if file.endswith(".csv") and ('CH1' in file)
+                if file.endswith(file_fmt) and ('CH1' in file)
             ]
             # read saved TOF spectra location
             self.params[filt_key]['file_data_TOF'] = [
@@ -172,9 +181,8 @@ class CompassRun:
                 if file.endswith(".txt") and ('CH0' in file) and ('PSD' in file)
             ]
 
-    def read_spectra(self, modes=None):
-        if modes is None:
-            modes = ['E', 'TOF', 'PSD']
+
+    def read_spectra(self, modes=['E', 'TOF', 'PSD']):
         """Read data from CoMPASS saved histograms."""
         if self.spectra is None:
             self.spectra = {}
@@ -190,7 +198,7 @@ class CompassRun:
                     ))
                     verboseprint('Read in CoMPASS spectrum for '
                                  f'{self.key} (mode: {mode}, {filt_key})')
-                except :
+                except:
                     print('WARNING: unable to open CoMPASS histogram for '
                           f'{self.key} (mode: {mode})')
 
@@ -198,45 +206,70 @@ class CompassRun:
         """Read raw data from CoMPASS-generated files."""
         if self.data is None:
             self.data = {}
+        file_fmt = '.' + self.settings['file_format'].lower()
         for filt_key in filtered:
             self.data[filt_key] = {}
             # attempt to read Ch. 0 (detector) data if it exists
             if len(self.params[filt_key]['file_CH0']) > 0:
                 verboseprint(
-                    f'Reading in {filt_key} CH0 data for key: {self.key}...',
+                    f'Reading {filt_key} CH0 data for key: {self.key}...',
                     end=""
                 )
                 try:
-                    self.data[filt_key]['CH0'] = pd.read_csv(
-                        self.folder + self.key + '/'
-                        + filt_key.upper() + '/'
-                        + self.params[filt_key]['file_CH0'][0],
-                        sep=';', on_bad_lines='skip'
-                    )
+                    if file_fmt == '.csv':
+                        self.data[filt_key]['CH0'] = pd.read_csv(
+                            self.folder + self.key + '/'
+                            + filt_key.upper() + '/'
+                            + self.params[filt_key]['file_CH0'][0],
+                            sep=';', on_bad_lines='skip'
+                        )
+                    elif file_fmt == 'bin':
+                        file = open(self.folder + self.key + '/'
+                                    + filt_key.upper() + '/'
+                                    + self.params[filt_key]['file_CH0'][0],
+                                    "rb")
+                        byte = file.read()
+                        data = struct.unpack(('<'+'HHQHHII'*(len(byte)//24)),
+                                             byte)
+                        self.data[filt_key]['CH0'] = pd.DataFrame(
+                            np.reshape(np.array(data), [-1, 7])[:, 2:5],
+                            columns = ['TIMETAG','ENERGY','ENERGYSHORT']
+                        )
                     if self.data[filt_key]['CH0'].empty:
                         print('file was empty.')
                     else:
                         print("Done!")
                 except:
-                    print(
-                        f'ERROR: unable to read in {filt_key} CH0 data '
-                        f'for {self.key}.'
-                    )
+                    print(f'ERROR: unable to read in {filt_key} CH0 data '
+                          f'for {self.key}.')
                     break
                 # attempt to read Ch. 1 (pulse) data if TOF not yet calculated
                 if 'TOF' in self.data[filt_key]['CH0']:
                     continue
                 if len(self.params[filt_key]['file_CH1']) > 0:
                     verboseprint(
-                        f'Reading in {filt_key} CH1 data for key: {self.key}...',
+                        f'Reading {filt_key} CH1 data for key: {self.key}...',
                         end=""
                     )
-                    self.data[filt_key]['CH1'] = pd.read_csv(
-                        self.folder + self.key + '/'
-                        + filt_key.upper() + '/'
-                        + self.params[filt_key]['file_CH1'][0],
-                        sep=';', on_bad_lines='skip'
-                    )
+                    if file_fmt == '.csv':
+                        self.data[filt_key]['CH1'] = pd.read_csv(
+                            self.folder + self.key + '/'
+                            + filt_key.upper() + '/'
+                            + self.params[filt_key]['file_CH0'][0],
+                            sep=';', on_bad_lines='skip'
+                        )
+                    elif file_fmt == 'bin':
+                        file = open(self.folder + self.key + '/'
+                                    + filt_key.upper() + '/'
+                                    + self.params[filt_key]['file_CH1'][0],
+                                    "rb")
+                        byte = file.read()
+                        data = struct.unpack(('<'+'HHQHHII'*(len(byte)//24)),
+                                             byte)
+                        self.data[filt_key]['CH1'] = pd.DataFrame(
+                            np.reshape(np.array(data), [-1, 7])[:, 2:5],
+                            columns = ['TIMETAG','ENERGY','ENERGYSHORT']
+                        )
                     if self.data[filt_key]['CH1'].empty:
                         print('no data found.')
                     else:
@@ -258,10 +291,10 @@ class CompassRun:
                     ('TOF' not in self.data[filt_key]['CH0'])):
                 # attempt to read in Channel 1 (pulse) data if not yet done
                 if ((len(self.params[filt_key]['file_CH1']) > 0) and
-                        not(('CH1' not in self.data[filt_key]) or
-                            self.data[filt_key]['CH1'].empty)):
+                        not(('CH1' not in self.data[filt_key])
+                            or self.data[filt_key]['CH1'].empty)):
                     verboseprint(
-                        f'Reading in {filt_key} CH1 data for key: {self.key}.'
+                        f'Reading {filt_key} CH1 data for key: {self.key}.'
                     )
                     try:
                         self.data[filt_key]['CH1'] = pd.read_csv(
@@ -273,11 +306,10 @@ class CompassRun:
                     except:
                         print(f'ERROR: unable to read in {filt_key} CH1 data '
                               f'for {self.key}.')
-                    break
+                        break
                 else:
-                    print(f'WARNING: TOF not calculated--'
-                          f'{filt_key} CH1 data non-existent or empty '
-                          f'for {self.key}.')
+                    print(f'WARNING: TOF not calculated--{filt_key} CH1 data'
+                          f'non-existent or empty for {self.key}.')
                     break
                 # check that neither CH0/CH1 are empty and timing info saved
                 if (all(not self.data[filt_key][ch].empty and
@@ -309,8 +341,8 @@ class CompassRun:
                 else:
                     print('ERROR: data empty or timetag not found.')
             else:
-                print(f'ERROR: No Ch.0 {filt_key} data found '
-                    'or TOF already calculated.')
+                print(f'Could not add TOF. Either no Ch.0 {filt_key} data found'
+                      ' or TOF already calculated.')
 
     def user_filter(self, e_lo=95, e_hi=135, prompt=False):
         """Perform user cut of energy spectrum."""
@@ -561,7 +593,8 @@ def initialize(folder=[], keys=[]):
     print('\nWelcome to CoMPASS Companion!')
     if folder == []:
         folder = click.prompt('\nTo begin, please enter a project folder path',
-                              default='C:/Users/Avram/Dropbox (MIT)/Resonances/data/CoMPASS/')
+                              default='C:/Users/Avram/Dropbox (MIT)/'
+                                      'Resonances/data/CoMPASS/')
     if keys == []:
         keys = select_keys(folder)
     verbose = click.confirm('\nVerbose Mode?', default=True)
@@ -684,6 +717,32 @@ def df_filter(df, filter_params):
     return df
 
 
+def plot_trans(runs, key_target, key_open,
+               t_lo=0., t_hi=200., n_bins=400, t_offset=10.0,
+               color='black', add_plot=False):
+    """Calculate transmission and plot."""
+    target_in = runs[key_target].data['filtered']['CH0']['TOF']
+    target_out = runs[key_open].data['filtered']['CH0']['TOF']
+    t_meas_in = runs[key_target].params['t_meas']
+    t_meas_out = runs[key_open].params['t_meas']
+    counts_in, __ = np.histogram(target_in, bins=n_bins, range=[t_lo, t_hi])
+    counts_out, __ = np.histogram(target_out, bins=n_bins, range=[t_lo, t_hi])
+    bins = np.linspace(t_lo, t_hi, n_bins+1)[:-1] + (
+        (t_hi-t_lo)/n_bins/2 - t_offset)
+    vals_trans, vals_errs = calc_trans(counts_in, counts_out,
+                                       t_meas_in, t_meas_out)
+    if not add_plot:
+        plt.figure(figsize=(16, 9))
+    plt.errorbar(x=bins, y=vals_trans, yerr=vals_errs,
+                 lw=2, elinewidth=0.5, capsize=1, color=color,
+                 label=key_target + ' transmission')
+    plt.xlim([max(0, t_lo), t_hi-t_offset])
+    plt.xlabel(r'TIME [$\mu$s]', labelpad=10)
+    plt.ylabel(r'TRANSMISSION', labelpad=10)
+    plt.legend()
+    plt.tight_layout()
+    return vals_trans, vals_errs, bins
+
 ################################################################################
 
 # set folder of CoMPASS runs
@@ -743,8 +802,8 @@ if __name__ == '__main__':
         # plot TOF for all keys overlaid
         plt.figure(figsize=(16, 9))
         for key in [
-            # 'w-double', 'w-double-empty', 'w-double-nolead', 'w-double-nolead_1',
-            # 'w-single', 'w-single-empty', 'w-single_1']:
+            # 'w-double', 'w-double-empty', 'w-double-nolead',
+            # 'w-double-nolead_1', 'w-single', 'w-single-empty', 'w-single_1']:
             'w-single', 'w-double'
         ]:
             # use 'norm' to normalize to meas. time in min.
@@ -780,31 +839,6 @@ plt.legend(loc='upper right')
 plt.xlabel('TIME (us)')
 plt.tight_layout()
 """
-
-
-def plot_trans(runs, key_target, key_open,
-               t_lo=0., t_hi=200., n_bins=400, t_offset=10.0,
-               color='black', add_plot=False):
-    """ calculate transmission and plot """
-    target_in = runs[key_target].data['filtered']['CH0']['TOF']
-    target_out = runs[key_open].data['filtered']['CH0']['TOF']
-    t_meas_in = runs[key_target].params['t_meas']
-    t_meas_out = runs[key_open].params['t_meas']
-    counts_in, __ = np.histogram(target_in, bins=n_bins, range=[t_lo, t_hi])
-    counts_out, __ = np.histogram(target_out, bins=n_bins, range=[t_lo, t_hi])
-    bins = np.linspace(t_lo, t_hi, n_bins+1)[:-1] + (t_hi-t_lo)/n_bins/2 - t_offset
-    vals_trans, vals_errs = calc_trans(counts_in, counts_out, t_meas_in, t_meas_out)
-    if not add_plot:
-        plt.figure(figsize=(16, 9))
-    plt.errorbar(x=bins, y=vals_trans, yerr=vals_errs,
-                 lw=2, elinewidth=0.5, capsize=1, color=color,
-                 label=key_target + ' transmission')
-    plt.xlim([max(0, t_lo), t_hi-t_offset])
-    plt.xlabel(r'TIME [$\mu$s]', labelpad=10)
-    plt.ylabel(r'TRANSMISSION', labelpad=10)
-    plt.legend()
-    plt.tight_layout()
-    return vals_trans, vals_errs, bins
 
 # merge all runs that only differ by end underscore
 key_stems = list({key.rsplit('_', maxsplit=1)[0] for key in keys})
