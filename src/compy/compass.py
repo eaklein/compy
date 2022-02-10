@@ -13,10 +13,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from scipy.stats import gaussian_kde
+from pprint import pprint
 
 import click
 import xmltodict
-
 
 # set plotting environment
 plt.close('all')
@@ -71,7 +71,23 @@ class CompassRun:
 
     def __init__(self, key, params=None, settings=None, spectra=None, data=None,
                  folder='C:/Users/Avram/Dropbox (MIT)/Resonances/data/CoMPASS/'):
-        """Initialize compassRun class."""
+        """Constructs all the necessary attributes for the compassRun class.
+
+        Parameters
+        ----------
+            key : str
+                unique run key assigned at creation
+            folder : str
+                DAQ folder location for CoMPASS project
+            params : dictionary
+                data acquisition parameters
+            settings : dict
+                CoMPASS settings read from xml file
+            spectra : dict
+                auto-generated spectra from CoMPASS
+            data : dictionary
+                un-/filtered data acquired and stored by CoMPASS
+        """
         self.key = key
         self.folder = folder
         self.params = params
@@ -80,7 +96,9 @@ class CompassRun:
         self.data = data
 
     def read_settings(self):
-        """Read CoMPASS project folder and extract settings for each run."""
+        """Read CoMPASS project folder and extract settings for each run.
+
+        """
         if self.settings is None:
             self.settings = {}
         try:
@@ -181,9 +199,14 @@ class CompassRun:
                 if file.endswith(".txt") and ('CH0' in file) and ('PSD' in file)
             ]
 
-
     def read_spectra(self, modes=['E', 'TOF', 'PSD']):
-        """Read data from CoMPASS saved histograms."""
+        """Read data from CoMPASS saved histograms.
+
+        Parameters
+        ----------
+            modes: list[str]
+                list of histogram types to read-in
+        """
         if self.spectra is None:
             self.spectra = {}
         for filt_key in ['unfiltered', 'filtered']:
@@ -203,7 +226,13 @@ class CompassRun:
                           f'{self.key} (mode: {mode})')
 
     def read_data(self, filtered=['unfiltered', 'filtered']):
-        """Read raw data from CoMPASS-generated files."""
+        """Read raw data from CoMPASS-generated files.
+
+        Parameters
+        ----------
+            filtered: list[str]
+                specifies un-/filtered folders from which to read data
+        """
         if self.data is None:
             self.data = {}
         file_fmt = '.' + self.settings['file_format'].lower()
@@ -233,7 +262,7 @@ class CompassRun:
                                              byte)
                         self.data[filt_key]['CH0'] = pd.DataFrame(
                             np.reshape(np.array(data), [-1, 7])[:, 2:5],
-                            columns = ['TIMETAG','ENERGY','ENERGYSHORT']
+                            columns=['TIMETAG', 'ENERGY', 'ENERGYSHORT']
                         )
                     if self.data[filt_key]['CH0'].empty:
                         print('file was empty.')
@@ -268,7 +297,7 @@ class CompassRun:
                                              byte)
                         self.data[filt_key]['CH1'] = pd.DataFrame(
                             np.reshape(np.array(data), [-1, 7])[:, 2:5],
-                            columns = ['TIMETAG','ENERGY','ENERGYSHORT']
+                            columns=['TIMETAG', 'ENERGY', 'ENERGYSHORT']
                         )
                     if self.data[filt_key]['CH1'].empty:
                         print('no data found.')
@@ -284,11 +313,21 @@ class CompassRun:
                 )
 
     def add_tof(self, filtered=['unfiltered', 'filtered']):
-        """Add TOF column to raw data dataframe."""
+        """Add TOF column to raw data dataframe.
+
+        Parameters
+        ----------
+            filtered: list[str]
+                specifies un-/filtered folders from which to read data
+        """
         for filt_key in filtered:
             # check if un-/filtered CH0 data present and TOF not yet calculated
-            if (('CH0' in self.data[filt_key]) and
-                    ('TOF' not in self.data[filt_key]['CH0'])):
+            if ('CH0' in self.data[filt_key]) and (
+                    'TOF' in self.data[filt_key]['CH0']):
+                print('TOF already calculated!')
+            elif 'CH0' in self.data[filt_key]:
+                print('Could not calculate TOF. Ch. 0 data not found!')
+            else:
                 # attempt to read in Channel 1 (pulse) data if not yet done
                 if ((len(self.params[filt_key]['file_CH1']) > 0) and
                         not(('CH1' not in self.data[filt_key])
@@ -340,12 +379,21 @@ class CompassRun:
                         break
                 else:
                     print('ERROR: data empty or timetag not found.')
-            else:
-                print(f'Could not add TOF. Either no Ch.0 {filt_key} data found'
-                      ' or TOF already calculated.')
+
 
     def user_filter(self, e_lo=95, e_hi=135, prompt=False):
-        """Perform user cut of energy spectrum."""
+        """Perform user cut of energy spectrum.
+
+        Parameters
+        ----------
+            e_lo: int
+                energy low cut (ADC)
+            e_hi : int
+                energy hi cut (ADC)
+            prompt: bool
+                flag whether to ask user for cut bounds (True)
+                or use defaults (False) if not provided
+        """
         print(f'\nUser energy cut requested for TOF spectrum for {self.key}.')
         self.data['user'] = {}
         # choose to prompt user or else use default values
@@ -372,9 +420,27 @@ class CompassRun:
         print('Successfully performed user energy cut of TOF spectrum '
               f'for {self.key}.\n')
 
-    def plot_tof(self, t_lo=0, t_hi=200, n_bins=400,
+    def plot_tof(self, t_lo=0., t_hi=200., n_bins=400, color='blue',
                  filtered='unfiltered', norm=True, add=False):
-        """Plot manually calculated TOF spectrum."""
+        """Plot manually calculated TOF spectrum.
+
+        Parameters
+        ----------
+            t_lo: float
+                lower bound on TOF
+            t_hi : float
+                upper bound on TOF
+            n_bins : int
+                number of histogram bins
+            color : str
+                color of plot
+            filtered : str
+                choice of un-/filtered or user filter data to plot
+            norm : bool
+                whether to normalize data by measurement time
+            add : bool
+                whether to add plot to existing figure
+        """
         if (('CH0' in self.data[filtered]) and
                 (self.data[filtered]['CH0'].size >= 0)):
             try:
@@ -391,7 +457,7 @@ class CompassRun:
                 weights = [1]*len(x)
                 plt.ylabel('COUNTS')
             plt.hist(x, range=[t_lo, t_hi], bins=n_bins, weights=weights,
-                     histtype='step', lw=2,
+                     histtype='step', lw=2, color=color,
                      label=(self.key + ' ' + filtered).replace('_', '-'))
             plt.xlim(t_lo, t_hi)
             plt.yscale('log')
@@ -402,7 +468,17 @@ class CompassRun:
             verboseprint(f'No {filtered} CH0 data found for {self.key}!')
 
     def plot_spectrum(self, mode='TOF', filtered='unfiltered', add=False):
-        """Plot spectrum auto-generated by CoMPASS."""
+        """Plot spectrum auto-generated by CoMPASS.
+
+        Parameters
+        ----------
+            mode: str
+                list of histogram types to read-in
+            filtered : str
+                specifies un-/filtered folder from which to read data
+            add : bool
+                whether to add plot to existing figure
+        """
         if add is False:
             plt.figure(figsize=(16, 9))
         y = self.spectra[filtered][mode]
@@ -430,78 +506,163 @@ class CompassRun:
         plt.legend(loc='upper right')
         plt.tight_layout()
 
-    def make_hist(self, filtered='unfiltered', mode='TOF', ch='CH0',
-                  val_lo=0, val_hi=200, n_bins=400):
-        """Create a histogram from TOF values."""
+    def make_hist(self, mode='TOF', filtered='unfiltered', ch='CH0',
+                  val_lo=0., val_hi=200., n_bins=400):
+        """Create a histogram from TOF values.
+
+        Parameters
+        ----------
+            mode: str
+                list of histogram types to read-in
+            filtered : str
+                specifies un-/filtered folder from which to read data
+            ch : str
+                specifies from which channel to read data
+            val_lo : float
+                lower bound on independent variable
+            val_hi :
+                upper bound on independent variable
+            n_bins : int
+                number of histogram bins
+
+        Returns
+        -------
+            hist : array
+                the values of the histogram
+            bin_edges : array
+                the bin edges
+        """
         hist, bin_edges = np.histogram(self.data[filtered][ch][mode].to_numpy(),
                                        range=[val_lo, val_hi], bins=n_bins)
         return hist, bin_edges
 
 
-def select_keys(folder):
-    """Select keys to process."""
-    keys = [item for item in os.listdir(folder)
-            if os.path.isdir(os.path.join(folder, item))]
-    print(f'Available keys to process are: {keys}.')
-    bool_all = click.confirm('\nWould you like to process all keys?',
-                             default=True)
-    # process all runs
-    if bool_all:
-        return keys
-    # manually select runs
-    bool_date = click.confirm('\nWould you like to process by date?',
-                              default=True)
-    if not bool_date:
-        keys_select = []
+def initialize(folders=None, keys=None):
+    """Start up CoMPy, the CoMPASS Companion.
+
+    Parameters
+    ----------
+        folders : list[str]
+            DAQ folders from which to select keys
+        keys : list[str]
+            run keys chosen for processing data
+
+    Returns
+    -------
+        folders : list[str]
+            DAQ folders from which to select keys
+        keys : list[str]
+            run keys chosen for processing data
+        VERBOSE : bool
+            flag for printing verbose information about data processing
+    """
+    print('\nWelcome to CoMPy, the CoMPASS companion for Python!')
+    if folders is None:
+        folders = []
         while True:
-            key = input(
-                'Type \'options\' to see all available options.'
-                '\nPress \'enter\' to end key selection.'
-                '\nEnter key name: '
-            )
-            # click 'enter' to end key selection
-            if not key and len(keys_select) != 0:
+            folder = input('Please enter a project folder path '
+                           '(ending in DAQ):\n')
+            if not folder:
                 break
-            # if 'enter', but no keys selected
-            if not key and len(keys_select) == 0:
-                print('You must enter at least one key name!')
-            elif key == 'options':
-                print(keys)
-            # if key selected
             else:
-                # if user entry not available key, print warning
-                while key not in keys:
-                    key = input(
-                        '\nThat key does not exist.'
-                        '\nType \'options\' to see all available options.'
-                        '\nPress \'enter\' to end key selection.'
-                        '\nEnter key name: '
-                    )
-                    if key == 'options':
-                        print(keys)
+                try:
+                    os.listdir(folder)
+                    folders.append(folder)
+                except FileNotFoundError:
+                    print('The system cannot find the specified folder. '
+                          'Please select another folder.')
+    if keys is None:
+        keys = select_keys(folders)
+    VERBOSE = click.confirm('\nVerbose Mode?', default=True)
+    return folders, keys, VERBOSE
+
+
+def select_keys(folders):
+    """Select keys to process.
+
+    Parameters
+    ----------
+        folders: list[str]
+            list of run folders to check for individual runs
+
+    Returns
+    -------
+        keys_select : dict[list[str]]
+            dictionary with project folders as keys,
+            containing lists of individual run keys
+    """
+    keys_select = []
+    n_folders = len(folders)
+    for i, folder in enumerate(folders):
+        # folder_key = folder.rsplit('/', maxsplit=3)[1]
+        # keys_select[folder_key] = []
+        keys_folder = [item for item in os.listdir(folder)
+                if os.path.isdir(os.path.join(folder, item))]
+        print('\nAvailable keys to process are: ')
+        pprint(keys_folder, compact=True)
+        bool_all = click.confirm('\nWould you like to process all keys?',
+                                 default=True)
+        # process all runs
+        if bool_all:
+            keys_new = [(key, folder) for key in keys_folder]
+            keys_select.extend(keys_new)
+            continue
+        # manually select runs
+        bool_date = click.confirm('\nWould you like to process by date?',
+                                  default=True)
+        if not bool_date:
+            while True:
+                n_keys = len(keys_select)
+                key_input = input(
+                    'Type \'options\' to see all available options.'
+                    '\nPress \'enter\' to end key selection.'
+                    '\nEnter key name: '
+                )
+                # click 'enter' to end key selection for folder
+                if not key_input:
+                    break
+                # if 'enter', but on last folder and no keys selected
+                if (not key_input) and (i == n_folders-1) and (n_keys == 0):
+                    print('You must enter at least one key name!')
+                # print all key options
+                elif key_input == 'options':
+                    print(keys_folder)
+                # if key selected
+                else:
+                    # if user entry not available key, print warning
+                    while key_input not in keys_folder:
+                        key_input = input(
+                            '\nThat key does not exist.'
+                            '\nType \'options\' to see all available options.'
+                            '\nPress \'enter\' to end key selection.'
+                            '\nEnter key name: '
+                        )
+                        if key_input == 'options':
+                            print(keys_folder)
+                    # if good key, append to list
+                    keys_select.append((key_input, folder))
+        else:
+            while True:
+                n_keys = len(keys_select)
+                date = input('(Note: \nPress \'enter\' to end key selection.)'
+                             '\nEnter run date: ')
+                # click 'enter' to end key selection
+                if ((not date) and (n_keys == 0)):
+                    break
+                if (n_keys != 0 and
+                        not any(key.startswith(date) for key in keys_folder)):
+                    print('Bad key provided.')
+                # if 'enter', but no keys selected
+                elif ((not any(key.startswith(date) for key in keys_folder))
+                      and n_keys == 0):
+                    print('Bad key provided. '
+                          'You must enter at least one key name!')
                 # if good key, append to list
-                keys_select.append(key)
-    else:
-        keys_select = []
-        while True:
-            date = input('(Note: \nPress \'enter\' to end key selection.)'
-                         '\nEnter run date: ')
-            # click 'enter' to end key selection
-            if not date and len(keys_select) != 0:
-                break
-            if (len(keys_select) != 0 and
-                  not any(key.startswith(date) for key in keys)):
-                print('Bad key provided.')
-            # if 'enter', but no keys selected
-            elif ((not any(key.startswith(date) for key in keys))
-                  and len(keys_select) == 0):
-                print('Bad key provided. '
-                      'You must enter at least one key name!')
-            # if good key, append to list
-            elif any(key.startswith(date) for key in keys):
-                for key in keys:
-                    if (key.startswith(date)) and (key not in keys_select):
-                        keys_select.append(key)
+                elif any(key.startswith(date) for key in keys_folder):
+                    for key in keys_folder:
+                        if ((key.startswith(date)) and
+                                ((key, folder) not in keys_select)):
+                            keys_select.append((key, folder))
     return keys_select
 
 
@@ -588,29 +749,12 @@ def merge_runs(keys, runs={}, merge_key=''):
     return run_merged
 
 
-def initialize(folder=[], keys=[]):
-    """ start up the CoMPASS Companion!"""
-    print('\nWelcome to CoMPASS Companion!')
-    if folder == []:
-        folder = click.prompt('\nTo begin, please enter a project folder path',
-                              default='C:/Users/Avram/Dropbox (MIT)/'
-                                      'Resonances/data/CoMPASS/')
-    if keys == []:
-        keys = select_keys(folder)
-    verbose = click.confirm('\nVerbose Mode?', default=True)
-    return folder, keys, verbose
-
-
-def process_runs(keys, runs={},
-                 folder='C:/Users/Avram/Dropbox (MIT)/Resonances/data/CoMPASS/',
-                 verbose=0):
+def process_runs(key_tuples, runs={}, verbose=0):
     """Read in settings, spectra, and data for specified runs."""
-    bool_TOF = click.confirm(
-        'Would you like to perform manual TOF calculation?',
-        default='Y'
-    )
+    bool_TOF = click.confirm('Would you like to manually calculate TOF?',
+                             default='Y')
     runs = runs
-    for key in keys:
+    for (key, folder) in key_tuples:
         if key != 'CoMPASS':
             print('\n' + f'Processing Key: {key}...')
             run = CompassRun(key=key, folder=folder)
@@ -743,210 +887,16 @@ def plot_trans(runs, key_target, key_open,
     plt.tight_layout()
     return vals_trans, vals_errs, bins
 
-################################################################################
-
-# set folder of CoMPASS runs
-folder = 'C:/Users/Avram/Dropbox (MIT)/Resonances/data/CoMPASS/20210531/DAQ/'
-folder = 'C:/Users/Avram/Dropbox (MIT)/MIT/research/NRTA/Experiments/IAP-2022/DAQ/'
-# folder = 'C:/CoMPASS/Lincoln-new/DAQ/'
-# folder = 'C:/Users/Avram/Dropbox (MIT)/MIT/research/NRTA/Experiments/DU-studies/DAQ/'
-
 if __name__ == '__main__':
-    folder, keys, verbose = initialize(folder=folder)
-    # set verbose mode
-    VERBOSE = True
+    folders = ['C:/Users/Avram/Dropbox (MIT)/MIT/research/NRTA/Experiments/du-studies/DAQ/',
+               # 'C:/Users/Avram/Dropbox (MIT)/Resonances/data/CoMPASS/20210531/DAQ/',
+               'C:/Users/Avram/Dropbox (MIT)/MIT/research/NRTA/Experiments/IAP-2022/DAQ/']
+    folder, key_tuples, VERBOSE = initialize(folders=folders)
     if VERBOSE:
         def verboseprint(*args, **kwargs):
             print(*args, **kwargs)
     else:
-        verboseprint = lambda *a, **k: None # do-nothing function
-    # verboseprint = print(*a, **k) if verbose else lambda *a, **k: None
-    # process CoMPASS files, reqs .CSV saving
-    runs = process_runs(keys, folder=folder, verbose=verbose)
-
-    bool_ex = False
-
-    """ EXAMPLES """
-
-    if bool_ex:
-        # choose key
-        key = 'U1Pb9'
-        run = runs[key]
-
-        # Manual filter on neutron peak in energy spectrum
-        run.user_filter()
-
-        # process another run and add to dictionary
-        keys_new = ['W_nozzle', 'W_part']
-        runs = process_runs(keys_new, runs=runs)
-
-        # merge two runs
-        # include runs dictionary to add merged run
-        run_merged = merge_runs(keys=keys_new, runs=runs)
-
-        runs[keys_new[0]].plot_tof('unfiltered', add=False)
-        runs[keys_new[1]].plot_tof('unfiltered', add=True)
-        runs['merged'].plot_tof('unfiltered', add=True)
-
-        # Manual adition of TOF if not done during initial processing
-        run.add_tof()   # manually add TOF for run
-
-        # plot pulse area for all counts
-        run.plot_spectrum(mode='E', filtered='unfiltered')
-
-        # compare manually calculated TOF spectrum for all / neutron counts
-        # use add to plot on existing figure
-        run.plot_tof(filtered='user', add=False)
-        run.plot_tof(filtered='filtered', add=True)
-
-        # plot TOF for all keys overlaid
-        plt.figure(figsize=(16, 9))
-        for key in [
-            # 'w-double', 'w-double-empty', 'w-double-nolead',
-            # 'w-double-nolead_1', 'w-single', 'w-single-empty', 'w-single_1']:
-            'w-single', 'w-double'
-        ]:
-            # use 'norm' to normalize to meas. time in min.
-            runs[key].plot_tof(norm=True, filtered='filtered', add=True)
-
-        for i, key in enumerate(runs):
-            run = runs[key]
-            if i != 0:
-                # use add to plot on existing figure
-                run.plot_spectrum(filtered='filtered', add=True)
-            else:
-                # use add to plot on existing figure
-                run.plot_spectrum(filtered='filtered', add=False)
-
-"""
-filtered = 'filtered'
-key = 'U_5_B4C-backfull_all'
-y = runs[key].data['filtered']['CH0']['TOF']
-yvals, __ = np.histogram(y, bins=800, range=[0, 200])
-yvals = yvals.astype(float)
-yerr = np.sqrt(yvals)
-yvals /= runs[key].params['t_meas']
-yerr /= runs[key].params['t_meas']
-plt.figure(figsize=(16, 9))
-weights = [1/runs[key].params['t_meas']]*len(y)
-plt.ylabel('COUNTS/MINUTE')
-plt.errorbar(np.linspace(0, 200, 801)[:-1], yvals, yerr=yerr,
-             color='black', capsize=1, elinewidth=0.5, drawstyle='steps-mid',
-             label='5 mm DU', lw=2)
-plt.xlim(0, 200)
-plt.yscale('log')
-plt.legend(loc='upper right')
-plt.xlabel('TIME (us)')
-plt.tight_layout()
-"""
-
-# merge all runs that only differ by end underscore
-key_stems = list({key.rsplit('_', maxsplit=1)[0] for key in keys})
-key_stems.sort(key=len)
-keys_all = []
-
-if 'w-double-nolead' in key_stems:
-    key_stems.remove('w-double-nolead')  # fix issue with double-nolead
-    for key in keys:
-        if key.startswith('w-double-nolead'):
-            keys.remove(key)
-stemkeys = list(keys)
-for stem in key_stems[::-1]:
-    keys_stem = [key for key in stemkeys
-                 if key.startswith(stem) and not key.endswith('all')]
-    if len(keys_stem) == 0:
-        continue
-    if len(keys_stem) > 1:
-        merge_runs(keys_stem, runs, merge_key=stem+'-merged')
-        keys_all.append(stem+'-merged')
-    else:
-        keys_all.append(keys_stem[0])
-    for key in keys_stem:
-        stemkeys.remove(key)
-keys = list(runs.keys())
-
-# plot filtered TOF spectra for all keys
-plt.figure(figsize=(16, 9))
-for key in keys:
-    vals_raw = np.array(runs[key].spectra['filtered']['TOF'])
-    t = runs[key].params['t_meas']
-    vals_err = np.sqrt(vals_raw) / t
-    vals = vals_raw / t
-    plt.errorbar(x=np.linspace(0, 192, 513)[1:], y=vals, yerr=vals_err,
-                 marker='s', linestyle='None', drawstyle='steps-mid',
-                 label=key.replace('_', '-'))
-plt.xlim(25, 185)
-plt.xlabel(r'TIME [$\mu$s]')
-plt.ylabel('COUNTS/MINUTE')
-plt.ylim(0, 3.5)
-plt.legend()
-plt.tight_layout()
-
-# merge selected runs
-run_merged = merge_runs([key for key in keys if key.startswith('du-1')], runs,
-                        merge_key='1 mm DU')
-run_merged = merge_runs([key for key in keys if key.startswith('du-all')], runs,
-                        merge_key='13 mm DU')
-
-keys_selected = [key for key in keys_all if key.startswith('w-single')]
-
-# plot TOF histogram for selected keys
-plt.figure(figsize=(16, 9))
-for key in keys_selected:
-    if not key.endswith('background'):
-        vals_raw, bins = np.histogram(runs[key].data['filtered']['CH0']['TOF'],
-                                      bins=512, range=[0, 192])
-        t = runs[key].params['t_meas']
-        vals_err = np.sqrt(vals_raw) / t
-        vals = vals_raw / t
-        plt.errorbar(x=np.linspace(0, 192, 513)[1:], y=vals, yerr=vals_err,
-                     marker='s', linestyle='None', drawstyle='steps-mid',
-                     label=key.replace('_', '-'))
-plt.xlim(25, 185)
-plt.xlabel(r'TIME [$\mu$s]')
-plt.ylabel('COUNTS/MINUTE')
-plt.ylim(0, 3.5)
-plt.legend()
-plt.tight_layout()
-
-plot_trans(runs, key_target='1 mm DU', key_open='no-target', n_bins=800,
-           color='blue')
-plot_trans(runs, key_target='13 mm DU', key_open='no-target', n_bins=800,
-           color='red')
-
-"""
-# merge_runs(runs['du-5-totalshield'],
-             runs['du-5-totalshield_1'],
-             runs, key='total')
-# merge_runs(runs['total'], runs['du-5-perp'],
-             runs, key='total')
-# merge_runs(runs['total'], runs['du-5-perp_1'],
-             runs, key='total')
-# merge_runs(runs['total'], runs['du-5-perp_2'],
-             runs, key='total')
-
-# plot_trans(runs, 'total', 'open', color='black', n_bins=800)
-
-# plot_trans(runs, 'parallel', 'open', color='blue')
-# plot_trans(runs, 'perpendicular', 'open', color='red', add_plot=True)
-
-plt.figure()
-for key in ['0124-open', '0124-Al', '0124-poly']:
-    plt.plot(runs[key].spectra['unfiltered']['E'], label=key.replace('_', '-'))
-plt.xlim(0, 650)
-plt.ylim(bottom=0)
-plt.legend()
-
-plt.figure()
-for key in ['0124-open_1', '0124-Wpart', '0124-Woreo', '0124-BNSIS']:
-    x = runs[key].spectra['unfiltered']['E']
-    x_out = runs['0124-open_1'].spectra['unfiltered']['E']
-    plt.plot(x,
-             drawstyle='steps-mid',
-             label=key.replace('_', '-'))
-    print(key.replace('_', '-'), sum(x[260:320]), np.sqrt(sum(x[260:320])))
-plt.xlim(0, 650)
-plt.ylim(bottom=0)
-plt.legend()
-
-"""
+        def verboseprint(*args, **kwargs):
+            return
+    runs = process_runs(key_tuples, verbose=VERBOSE)
+    keys = runs.keys()
