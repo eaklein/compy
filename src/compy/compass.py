@@ -8,12 +8,12 @@ import os
 from bisect import bisect_left
 from copy import deepcopy
 import struct
+from pprint import pprint
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-from scipy.stats import gaussian_kde
-from pprint import pprint
+# from scipy.stats import gaussian_kde
 
 import click
 import xmltodict
@@ -87,6 +87,10 @@ class CompassRun:
                 auto-generated spectra from CoMPASS
             data : dictionary
                 un-/filtered data acquired and stored by CoMPASS
+            t_meas : float
+                acquisition time in minutes
+            file_fmt : string
+                file format of saved CoMPASS data (e.g., csv, bin)
         """
         self.key = key
         self.folder = folder
@@ -94,6 +98,8 @@ class CompassRun:
         self.settings = settings
         self.spectra = spectra
         self.data = data
+        self.t_meas = 0.
+        self.file_fmt = ''
 
     def read_settings(self):
         """Read CoMPASS project folder and extract settings for each run.
@@ -114,14 +120,14 @@ class CompassRun:
                           ):
                 self.settings[entry['key']] = entry['value']['value']['#text']
             # read acquisition time and convert to minutes
-            self.settings['t_meas'] = float(
+            self.t_meas = float(
                 settings_xml
                 ['configuration']
                 ['acquisitionMemento']
                 ['timedRunDuration']
                 )
-            self.settings['t_meas'] /= 1000*60
-            self.settings['file_format'] = (
+            self.t_meas /= 1000*60
+            self.file_fmt = (
                 settings_xml
                 ['configuration']
                 ['acquisitionMemento']
@@ -134,9 +140,8 @@ class CompassRun:
             )
             return
         # store certain settings in params dictionary
-        self.params = {}
-        # read measurement time
-        self.params['t_meas'] = self.settings['t_meas']
+        if self.params is None:
+            self.params = {}
         # read parameters for TOF spectra
         self.params['TOF'] = {}
         self.params['TOF']['n_bins'] = int(float(
@@ -161,7 +166,7 @@ class CompassRun:
             self.settings['SW_PARAMETER_PSDBINCOUNT']
         ))
         # read files from run directory
-        file_fmt = '.' + self.settings['file_format'].lower()
+        file_fmt = '.' + self.file_fmt.lower()
         for filt_key in ['unfiltered', 'filtered']:
             filt_upper = filt_key.upper()
             self.params[filt_key] = {}
@@ -199,46 +204,98 @@ class CompassRun:
                 if file.endswith(".txt") and ('CH0' in file) and ('PSD' in file)
             ]
 
-    def read_spectra(self, modes=['E', 'TOF', 'PSD']):
+    def read_spectra(self, filtered=['unfiltered', 'filtered'],
+                     modes=['E', 'TOF', 'PSD']):
         """Read data from CoMPASS saved histograms.
 
         Parameters
         ----------
-            modes: list[str]
+            filtered : list[str]
+                specifies un-/filtered folders from which to read data
+            modes : list[str]
                 list of histogram types to read-in
         """
         if self.spectra is None:
             self.spectra = {}
-        for filt_key in ['unfiltered', 'filtered']:
+        for filt_key in filtered:
             self.spectra[filt_key] = {}
             for mode in modes:
                 key_data = 'file_data_' + mode
-                try:
-                    self.spectra[filt_key][mode] = np.array(np.loadtxt(
-                        self.folder + self.key + '/'
-                        + filt_key.upper() + '/'
-                        + max(self.params[filt_key][key_data])
-                    ))
+                if self.params[filt_key][key_data]:
+                    self.spectra[filt_key][mode] = {}
+                    try:
+                        self.spectra[filt_key][mode]['vals'] = np.array(
+                            np.loadtxt(self.folder + self.key + '/'
+                                       + filt_key.upper() + '/'
+                                       + max(self.params[filt_key][key_data]))
+                        )
+                    except:
+                        print('WARNING: unable to open CoMPASS histogram for '
+                              f'{self.key} (mode: {mode})')
+                        break
+                    if mode == 'TOF':
+                        self.spectra[filt_key][mode]['bins'] = np.linspace(
+                            self.params['TOF']['t_lo'],
+                            self.params['TOF']['t_hi'],
+                            self.params['TOF']['n_bins']
+                        )
+                    else:
+                        self.spectra[filt_key][mode]['bins'] = np.arange(
+                            self.params[mode]['n_bins']
+                        )
                     verboseprint('Read in CoMPASS spectrum for '
                                  f'{self.key} (mode: {mode}, {filt_key})')
-                except:
-                    print('WARNING: unable to open CoMPASS histogram for '
-                          f'{self.key} (mode: {mode})')
+
+
+    def add_spectrum(self, filtered=['unfiltered', 'filtered'], mode='TOF'):
+        """Add spectrum using stored data.
+
+        Parameters
+        ----------
+            filtered : str
+                specifies whether to use filtered or unfiltered data
+        """
+        for filt_key in filtered:
+            data = self.data[filt_key]['CH0']
+            if mode == 'TOF':
+                if 'TOF' not in data:
+                    self.add_tof(filtered)
+                x = data.TOF
+                n_bins = self.params['TOF']['n_bins']
+                x_lo = self.params['TOF']['t_lo']
+                x_hi = self.params['TOF']['t_hi']
+            elif mode == 'E':
+                x = data.ENERGY
+                n_bins = self.params['TOF']['n_bins']
+                x_lo = 0
+                x_hi = n_bins-1
+            elif mode == 'PSD':
+                if 'PSD' not in data:
+                    self.add_psd([filt_key])
+                x = data.PSD
+                n_bins = self.params['TOF']['n_bins']
+                x_lo = 0
+                x_hi = n_bins-1
+            hist, bin_edges = np.histogram(x, bins=n_bins, range=[x_lo, x_hi])
+            bins = bin_edges[:-1] + 0.5*(x_hi-x_lo)/n_bins
+            self.spectra[filt_key][mode]['vals'] = hist
+            self.spectra[filt_key][mode]['bins'] = bins
+
 
     def read_data(self, filtered=['unfiltered', 'filtered']):
         """Read raw data from CoMPASS-generated files.
 
         Parameters
         ----------
-            filtered: list[str]
+            filtered : list[str]
                 specifies un-/filtered folders from which to read data
         """
         if self.data is None:
             self.data = {}
-        file_fmt = '.' + self.settings['file_format'].lower()
+        file_fmt = '.' + self.file_fmt.lower()
         for filt_key in filtered:
             self.data[filt_key] = {}
-            # attempt to read Ch. 0 (detector) data if it exists
+            # attempt to read Ch.0 (detector) data if it exists
             if len(self.params[filt_key]['file_CH0']) > 0:
                 verboseprint(
                     f'Reading {filt_key} CH0 data for key: {self.key}...',
@@ -253,11 +310,11 @@ class CompassRun:
                             sep=';', on_bad_lines='skip'
                         )
                     elif file_fmt == 'bin':
-                        file = open(self.folder + self.key + '/'
-                                    + filt_key.upper() + '/'
-                                    + self.params[filt_key]['file_CH0'][0],
-                                    "rb")
-                        byte = file.read()
+                        with open(self.folder + self.key + '/'
+                                  + filt_key.upper() + '/'
+                                  + self.params[filt_key]['file_CH0'][0],
+                                  "rb") as f:
+                            byte = f.read()
                         data = struct.unpack(('<'+'HHQHHII'*(len(byte)//24)),
                                              byte)
                         self.data[filt_key]['CH0'] = pd.DataFrame(
@@ -272,7 +329,7 @@ class CompassRun:
                     print(f'ERROR: unable to read in {filt_key} CH0 data '
                           f'for {self.key}.')
                     break
-                # attempt to read Ch. 1 (pulse) data if TOF not yet calculated
+                # attempt to read Ch.1 (pulse) data if TOF not yet calculated
                 if 'TOF' in self.data[filt_key]['CH0']:
                     continue
                 if len(self.params[filt_key]['file_CH1']) > 0:
@@ -288,11 +345,11 @@ class CompassRun:
                             sep=';', on_bad_lines='skip'
                         )
                     elif file_fmt == 'bin':
-                        file = open(self.folder + self.key + '/'
+                        with open(self.folder + self.key + '/'
                                     + filt_key.upper() + '/'
                                     + self.params[filt_key]['file_CH1'][0],
-                                    "rb")
-                        byte = file.read()
+                                    "rb") as f:
+                            byte = f.read()
                         data = struct.unpack(('<'+'HHQHHII'*(len(byte)//24)),
                                              byte)
                         self.data[filt_key]['CH1'] = pd.DataFrame(
@@ -317,7 +374,7 @@ class CompassRun:
 
         Parameters
         ----------
-            filtered: list[str]
+            filtered : list[str]
                 specifies un-/filtered folders from which to read data
         """
         for filt_key in filtered:
@@ -325,8 +382,8 @@ class CompassRun:
             if ('CH0' in self.data[filt_key]) and (
                     'TOF' in self.data[filt_key]['CH0']):
                 print('TOF already calculated!')
-            elif 'CH0' in self.data[filt_key]:
-                print('Could not calculate TOF. Ch. 0 data not found!')
+            elif 'CH0' not in self.data[filt_key]:
+                print('Could not calculate TOF. Ch.0 data not found!')
             else:
                 # attempt to read in Channel 1 (pulse) data if not yet done
                 if ((len(self.params[filt_key]['file_CH1']) > 0) and
@@ -351,7 +408,7 @@ class CompassRun:
                           f'non-existent or empty for {self.key}.')
                     break
                 # check that neither CH0/CH1 are empty and timing info saved
-                if (all(not self.data[filt_key][ch].empty and
+                if (all((not self.data[filt_key][ch].empty) and
                         ('TIMETAG' in self.data[filt_key][ch]))
                         for ch in ['CH0', 'CH1']):
                     verboseprint(
@@ -381,6 +438,59 @@ class CompassRun:
                     print('ERROR: data empty or timetag not found.')
 
 
+    def add_psd(self, filtered=['unfiltered', 'filtered'], file_write=True):
+        """Add PSD column to raw data dataframe.
+
+        Parameters
+        ----------
+            filtered : list[str]
+                specifies un-/filtered folders from which to read data
+            file_write : bool
+                specifies whether to write new dataframe with PSD to file
+        """
+        for filt_key in filtered:
+            # check if un-/filtered CH0 data present and TOF not yet calculated
+            if 'CH0' not in self.data[filt_key]:
+                print('Could not calculate PSD. Ch.0 data not found!')
+            elif ('CH0' in self.data[filt_key]) and (
+                    'PSD' in self.data[filt_key]['CH0']):
+                print('PSD already calculated!')
+            else:
+                # check that CH0 is not empty
+                if not self.data[filt_key]['CH0'].empty:
+                    verboseprint(
+                        f'Calculating {filt_key} PSD for {self.key}'
+                    )
+                    try:
+                        # calculate PSD
+                        data = self.data[filt_key]['CH0']
+                        self.data[filt_key]['CH0']['PSD'] = (
+                            1 - data['ENERGYSHORT'] / data['ENERGY'])
+                    except:
+                        print('ERROR: issue arose calculating PSD.')
+                        break
+                    if 'TOF' not in self.data[filt_key]['CH0']:
+                        file_write = click.confirm(
+                            '\nNo TOF data was found in dataframe. Are you sure'
+                            ' you want to overwrite data file to incldue PSD?',
+                            default=False
+                        )
+                    if file_write:
+                        try:
+                            # rewrite CH0 csv file with PSD added
+                            self.data[filt_key]['CH0'].to_csv(
+                                self.folder + self.key + '/'
+                                + filt_key.upper() + '/'
+                                + self.params[filt_key]['file_CH0'][0],
+                                sep=';', index=False
+                            )
+                        except:
+                            print('ERROR: issue arose writing PSD to file.')
+                            break
+                else:
+                    print('ERROR: Ch.0 data empty.')
+
+
     def user_filter(self, e_lo=95, e_hi=135, prompt=False):
         """Perform user cut of energy spectrum.
 
@@ -390,7 +500,7 @@ class CompassRun:
                 energy low cut (ADC)
             e_hi : int
                 energy hi cut (ADC)
-            prompt: bool
+            prompt : bool
                 flag whether to ask user for cut bounds (True)
                 or use defaults (False) if not provided
         """
@@ -426,7 +536,7 @@ class CompassRun:
 
         Parameters
         ----------
-            t_lo: float
+            t_lo : float
                 lower bound on TOF
             t_hi : float
                 upper bound on TOF
@@ -451,7 +561,7 @@ class CompassRun:
             if not add:
                 plt.figure(figsize=(16, 9))
             if norm:
-                weights = [1/self.params['t_meas']]*len(x)
+                weights = [1/self.t_meas]*len(x)
                 plt.ylabel('COUNTS/MINUTE')
             else:
                 weights = [1]*len(x)
@@ -472,7 +582,7 @@ class CompassRun:
 
         Parameters
         ----------
-            mode: str
+            mode : str
                 list of histogram types to read-in
             filtered : str
                 specifies un-/filtered folder from which to read data
@@ -481,21 +591,13 @@ class CompassRun:
         """
         if add is False:
             plt.figure(figsize=(16, 9))
-        y = self.spectra[filtered][mode]
+        x = self.spectra[filtered][mode]['bins']
+        y = self.spectra[filtered][mode]['vals']
         if mode == 'TOF':
-            t_lo = self.params['TOF']['t_lo']
-            t_hi = self.params['TOF']['t_hi']
-            n_bins = self.params['TOF']['n_bins']
-            x = np.linspace(t_lo, t_hi, n_bins)
             plt.xlim(self.params['TOF']['t_lo'], self.params['TOF']['t_hi'])
             plt.xlabel('TIME (us)')
-        elif mode == 'PSD':
-            x = np.arange(self.params['PSD']['n_bins'])
-            plt.xlabel('PSD CHANNEL')
-            plt.xlim(min(x), max(x))
         else:
-            x = np.arange(1, len(y)+1)
-            plt.xlim(0, len(y))
+            plt.xlim(min(x), max(x))
             plt.xlabel('CHANNEL')
         plt.errorbar(x, y, yerr=[np.sqrt(i) for i in y],
                      capsize=2, drawstyle='steps-mid',
@@ -512,7 +614,7 @@ class CompassRun:
 
         Parameters
         ----------
-            mode: str
+            mode : str
                 list of histogram types to read-in
             filtered : str
                 specifies un-/filtered folder from which to read data
@@ -560,21 +662,20 @@ def initialize(folders=None, keys=None):
     if folders is None:
         folders = []
         while True:
-            folder = input('Please enter a project folder path '
+            new_folder = input('Please enter a project folder path '
                            '(ending in DAQ):\n')
-            if not folder:
+            if not new_folder:
                 break
-            else:
-                try:
-                    os.listdir(folder)
-                    folders.append(folder)
-                except FileNotFoundError:
-                    print('The system cannot find the specified folder. '
-                          'Please select another folder.')
+            try:
+                os.listdir(new_folder)
+                folders.append(new_folder)
+            except FileNotFoundError:
+                print('The system cannot find the specified folder. '
+                      'Please select another folder.')
     if keys is None:
         keys = select_keys(folders)
-    VERBOSE = click.confirm('\nVerbose Mode?', default=True)
-    return folders, keys, VERBOSE
+    verbose = click.confirm('\nVerbose Mode?', default=True)
+    return folders, keys, verbose
 
 
 def select_keys(folders):
@@ -582,14 +683,13 @@ def select_keys(folders):
 
     Parameters
     ----------
-        folders: list[str]
+        folders : list[str]
             list of run folders to check for individual runs
 
     Returns
     -------
-        keys_select : dict[list[str]]
-            dictionary with project folders as keys,
-            containing lists of individual run keys
+        keys_select : list[tuple(str, str)]
+            list of tuples of (key, folder)
     """
     keys_select = []
     n_folders = len(folders)
@@ -597,7 +697,7 @@ def select_keys(folders):
         # folder_key = folder.rsplit('/', maxsplit=3)[1]
         # keys_select[folder_key] = []
         keys_folder = [item for item in os.listdir(folder)
-                if os.path.isdir(os.path.join(folder, item))]
+                       if os.path.isdir(os.path.join(folder, item))]
         print('\nAvailable keys to process are: ')
         pprint(keys_folder, compact=True)
         bool_all = click.confirm('\nWould you like to process all keys?',
@@ -667,14 +767,14 @@ def select_keys(folders):
 
 
 def merge_copy(d1, d2):
-    """ merge nested dicts """
+    """Merge nested dicts."""
     return {k: merge_copy(d1[k], d2[k])
             if k in d1 and isinstance(d1[k], dict) and isinstance(d2[k], dict)
             else merge_vals(d1[k], d2[k]) for k in d2}
 
 
 def merge_vals(x, y):
-    """ combine keys in dict """
+    """Combine keys in dict."""
     if x == y:
         return x
     if isinstance(x, list) and isinstance(y, list):
@@ -682,8 +782,8 @@ def merge_vals(x, y):
     return [x, y]
 
 
-def merge_runs(keys, runs={}, merge_key=''):
-    """ merge data from CoMPASS runs """
+def merge_runs(keys, runs, merge_key=''):
+    """Merge data from CoMPASS runs."""
     # choose key for merged run
     if merge_key == '':
         merge_key = click.prompt('Which key should be used for the merged run?')
@@ -695,14 +795,15 @@ def merge_runs(keys, runs={}, merge_key=''):
         run = runs[key]
         # check settings
         if run.settings != run_merged.settings:
-            print('Runs have different settings.')
-            settings_key = keys[0]
-            settings_key = click.prompt(
-                "Please select:",
-                type=click.Choice([run.key, run_merged.key],
-                                  case_sensitive=False)
+            [print(f'Different settings found for {x[0]} ({x[1]} vs. {y[1]})'
+                   ) for x, y in zip(run.settings.items(),
+                                     run_merged.settings.items()) if x != y]
+            keep_settings = click.confirm(
+                'Would you like to keep the settings for the merged key?',
+                default='Y'
             )
-            run_merged.settings = runs[settings_key].settings
+            if not keep_settings:
+                run_merged.settings = run.settings
         # check folder
         run_merged.folder = [[run.folder, run_merged.folder]
                              if run.folder != run_merged.folder else run.folder]
@@ -731,10 +832,10 @@ def merge_runs(keys, runs={}, merge_key=''):
                     ]
         # merge params
         print(f'Merging parameters for {run.key} and {run_merged.key}.')
-        t_meas = run_merged.params['t_meas']
+        t_meas = run_merged.t_meas
         run_merged.params = merge_copy(run.params, run_merged.params)
-        run_merged.params['t_meas'] = t_meas
-        run_merged.params['t_meas'] += run.params['t_meas']
+        run_merged.t_meas = t_meas
+        run_merged.t_meas += run.t_meas
         # merge data
         for filtered in ['unfiltered', 'filtered']:
             for run in [run, run_merged]:
@@ -749,18 +850,50 @@ def merge_runs(keys, runs={}, merge_key=''):
     return run_merged
 
 
-def process_runs(key_tuples, runs={}, verbose=0):
+def merge_related_runs(runs):
+    """Get list of total run basenames.
+
+    Parameters
+    ----------
+        runs : dict{CompassRun}
+            dictionary of compass runs to search for related runs
+
+    Returns
+    -------
+    """
+    # merge all runs that only differ by end underscore
+    stem_keys = list(runs.keys())
+    # generate dictionary with stems as keys and run names as values
+    key_stems = {}
+    for stem_key in stem_keys:
+        key_split = stem_key.rsplit('_', maxsplit=1)
+        if (len(key_split) > 1) and (key_split[-1].isdigit()):
+            stem = key_split[0]
+            if key_split[0] not in key_stems:
+                key_stems[stem] = []
+            key_stems[stem].append(stem_key)
+        else:
+            key_stems[stem_key] = [stem_key]
+    for stem, keys in key_stems.items():
+        if len(keys) > 1:
+            print('\nMerging runs:', ', '.join(str(i) for i in keys))
+            merge_runs(keys, runs, merge_key=stem+'-merged')
+            [runs.pop(key) for key in keys]
+
+
+def process_runs(key_tuples, runs=None):
     """Read in settings, spectra, and data for specified runs."""
+    if runs is None:
+        runs = {}
     bool_TOF = click.confirm('Would you like to manually calculate TOF?',
                              default='Y')
-    runs = runs
     for (key, folder) in key_tuples:
         if key != 'CoMPASS':
             print('\n' + f'Processing Key: {key}...')
             run = CompassRun(key=key, folder=folder)
             run.read_settings()
-            run.read_spectra()
             run.read_data()
+            run.read_spectra()
             if bool_TOF:
                 run.add_tof()
             runs[key] = run
@@ -768,7 +901,7 @@ def process_runs(key_tuples, runs={}, verbose=0):
 
 
 def calc_TOF(t_pulse, t_signal):
-    "calculate TOF from pulse and signal time arrays"
+    """Calculate TOF from pulse and signal time arrays."""
     tof = []
     for t in t_signal:
         idx = bisect_left(t_pulse, t)
@@ -781,7 +914,7 @@ def calc_TOF(t_pulse, t_signal):
 
 
 def calc_trans(counts_in, counts_out, t_meas_in, t_meas_out):
-    """ calculate transmission and propagate error """
+    """Calculate transmission and propagate error."""
     vals_trans = [(x/t_meas_in)/(y/t_meas_out) if
                   y != 0 else 0 for x, y in zip(counts_in, counts_out)]
     err_trans = [(x/t_meas_in)/(y/t_meas_out)
@@ -790,10 +923,12 @@ def calc_trans(counts_in, counts_out, t_meas_in, t_meas_out):
     return np.array(vals_trans), np.array(err_trans)
 
 
-def calc_atten(data, thick, err_thick={}, keys=[], key_ref='target_out',
+def calc_atten(data, thick, err_thick=None, keys=None, key_ref='target_out',
                bin_lo=90, bin_hi=135):
-    """ calc transuation in number of counts """
-    if keys == []:
+    """Calc transuation in number of counts."""
+    if err_thick is None:
+        err_thick = {}
+    if keys is None:
         keys = list(data.keys())
         keys.remove(key_ref)
     if err_thick == {}:
@@ -831,8 +966,10 @@ def plot_2d(runs, key, var1, var2, filtered='unfiltered'):
     plt.legend()
 
 
-def plot_e_psd(runs, key, filter_params={}, w=1.0):
+def plot_e_psd(runs, key, filter_params=None, w=1.0):
     """Plot energy vs PSD."""
+    if filter_params is None:
+        filter_params = {}
     data = runs[key].data['unfiltered']['CH0']
     data['PSD'] = 1 - (data['ENERGYSHORT'] / data['ENERGY'])
     data = df_filter(data, filter_params)
@@ -867,8 +1004,8 @@ def plot_trans(runs, key_target, key_open,
     """Calculate transmission and plot."""
     target_in = runs[key_target].data['filtered']['CH0']['TOF']
     target_out = runs[key_open].data['filtered']['CH0']['TOF']
-    t_meas_in = runs[key_target].params['t_meas']
-    t_meas_out = runs[key_open].params['t_meas']
+    t_meas_in = runs[key_target].t_meas
+    t_meas_out = runs[key_open].t_meas
     counts_in, __ = np.histogram(target_in, bins=n_bins, range=[t_lo, t_hi])
     counts_out, __ = np.histogram(target_out, bins=n_bins, range=[t_lo, t_hi])
     bins = np.linspace(t_lo, t_hi, n_bins+1)[:-1] + (
@@ -887,6 +1024,7 @@ def plot_trans(runs, key_target, key_open,
     plt.tight_layout()
     return vals_trans, vals_errs, bins
 
+
 if __name__ == '__main__':
     folders = ['C:/Users/Avram/Dropbox (MIT)/MIT/research/NRTA/Experiments/du-studies/DAQ/',
                # 'C:/Users/Avram/Dropbox (MIT)/Resonances/data/CoMPASS/20210531/DAQ/',
@@ -894,9 +1032,11 @@ if __name__ == '__main__':
     folder, key_tuples, VERBOSE = initialize(folders=folders)
     if VERBOSE:
         def verboseprint(*args, **kwargs):
+            """Print additional details about processing data."""
             print(*args, **kwargs)
     else:
         def verboseprint(*args, **kwargs):
+            """Do not print additional details about processing data."""
             return
-    runs = process_runs(key_tuples, verbose=VERBOSE)
-    keys = runs.keys()
+    runs = process_runs(key_tuples)
+    merge_related_runs(runs)
