@@ -9,14 +9,14 @@ from bisect import bisect_left
 from copy import deepcopy
 import struct
 from pprint import pprint
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-# from scipy.stats import gaussian_kde
-
 import click
 import xmltodict
+# from scipy.stats import gaussian_kde
 
 # set plotting environment
 plt.close('all')
@@ -46,6 +46,10 @@ class CompassRun:
         auto-generated spectra from CoMPASS
     data : dictionary
         un-/filtered data acquired and stored by CoMPASS
+    t_meas : float
+        acquisition time in minutes
+    file_fmt : string
+        file format of saved CoMPASS data (e.g., csv, bin)
 
     Methods
     -------
@@ -53,6 +57,8 @@ class CompassRun:
         Read CoMPASS project folder and extract settings for each run.
     read_spectra(modes=['E', 'TOF', 'PSD']):
         Read data from CoMPASS saved histogram.
+    add_spectra(filtered=['unfiltered', 'filtered'], modes=['E', 'TOF']):
+        Add spectra for specified filtered data and modes
     read_data(filtered=['unfiltered', 'filtered']):
         Read raw data from CoMPASS-generated files.
     add_tof(filtered=['unfiltered', 'filtered']):
@@ -70,6 +76,7 @@ class CompassRun:
     """
 
     def __init__(self, key, params=None, settings=None, spectra=None, data=None,
+                 t_meas=0., file_fmt='',
                  folder='C:/Users/Avram/Dropbox (MIT)/Resonances/data/CoMPASS/'):
         """Constructs all the necessary attributes for the compassRun class.
 
@@ -98,8 +105,8 @@ class CompassRun:
         self.settings = settings
         self.spectra = spectra
         self.data = data
-        self.t_meas = 0.
-        self.file_fmt = ''
+        self.t_meas = t_meas
+        self.file_fmt = file_fmt
 
     def read_settings(self):
         """Read CoMPASS project folder and extract settings for each run.
@@ -247,39 +254,59 @@ class CompassRun:
                                  f'{self.key} (mode: {mode}, {filt_key})')
 
 
-    def add_spectrum(self, filtered=['unfiltered', 'filtered'], mode='TOF'):
+    def add_spectra(self, filtered=['unfiltered', 'filtered'],
+                    modes=['TOF', 'E']):
         """Add spectrum using stored data.
 
         Parameters
         ----------
             filtered : str
                 specifies whether to use filtered or unfiltered data
+            modes : list[str]
+                which modes for which to make spectra
         """
         for filt_key in filtered:
-            data = self.data[filt_key]['CH0']
-            if mode == 'TOF':
-                if 'TOF' not in data:
-                    self.add_tof(filtered)
-                x = data.TOF
-                n_bins = self.params['TOF']['n_bins']
-                x_lo = self.params['TOF']['t_lo']
-                x_hi = self.params['TOF']['t_hi']
-            elif mode == 'E':
-                x = data.ENERGY
-                n_bins = self.params['TOF']['n_bins']
-                x_lo = 0
-                x_hi = n_bins-1
-            elif mode == 'PSD':
-                if 'PSD' not in data:
-                    self.add_psd([filt_key])
-                x = data.PSD
-                n_bins = self.params['TOF']['n_bins']
-                x_lo = 0
-                x_hi = n_bins-1
-            hist, bin_edges = np.histogram(x, bins=n_bins, range=[x_lo, x_hi])
-            bins = bin_edges[:-1] + 0.5*(x_hi-x_lo)/n_bins
-            self.spectra[filt_key][mode]['vals'] = hist
-            self.spectra[filt_key][mode]['bins'] = bins
+            data = self.data[filt_key]['CH0'].copy()
+            x = pd.DataFrame()
+            for mode in modes:
+                print(f'Adding {filt_key} {mode} spectrum...', end="")
+                if mode not in self.spectra[filt_key]:
+                    self.spectra[filt_key][mode] = {}
+                if mode == 'TOF':
+                    if mode not in data:
+                        self.add_tof(filtered)
+                    try:
+                        x = data['TOF']
+                        n_bins = self.params['TOF']['n_bins']
+                        x_lo = self.params['TOF']['t_lo']
+                        x_hi = self.params['TOF']['t_hi']
+                    except:
+                        print('Could not add spectrum. No TOF!')
+                elif mode == 'E':
+                    try:
+                        x = data['ENERGY']
+                        n_bins = self.params['TOF']['n_bins']
+                        x_lo = 0
+                        x_hi = n_bins-1
+                    except:
+                        print('Could not add spectrum. No energy!')
+                elif mode == 'PSD':
+                    if 'PSD' not in data:
+                        self.add_psd([filt_key])
+                    try:
+                        x = data['PSD']
+                        n_bins = self.params['TOF']['n_bins']
+                        x_lo = 0
+                        x_hi = n_bins-1
+                    except:
+                        print('Could not add spectrum. No PSD!')
+                if len(x.index) > 0:
+                    hist, bin_edges = np.histogram(x, bins=n_bins,
+                                                   range=[x_lo, x_hi])
+                    bins = bin_edges[:-1] + 0.5*(x_hi-x_lo)/n_bins
+                    self.spectra[filt_key][mode]['vals'] = hist
+                    self.spectra[filt_key][mode]['bins'] = bins
+                    print("Done!")
 
 
     def read_data(self, filtered=['unfiltered', 'filtered']):
@@ -782,8 +809,21 @@ def merge_vals(x, y):
     return [x, y]
 
 
-def merge_runs(keys, runs, merge_key=''):
-    """Merge data from CoMPASS runs."""
+def merge_runs(keys, runs, merge_key='', quiet=False):
+    """Merge data from CoMPASS runs.
+
+    Parameters
+    ----------
+        keys : list[str]
+            list of keys to check for merging
+        runs : dict[CompassRun]
+            dictionary of runs from which to search for keys
+        merge_key : str
+            run key to use for the merged CompassRun
+        quiet : bool
+            flag for whether to prompt user in case of diff settings (False)
+            or to use defaults (True)
+    """
     # choose key for merged run
     if merge_key == '':
         merge_key = click.prompt('Which key should be used for the merged run?')
@@ -792,18 +832,22 @@ def merge_runs(keys, runs, merge_key=''):
     run_merged.key = merge_key
     # iterate over additional keys to merge
     for key in keys[1:]:
-        run = runs[key]
+        keep_settings = True
+        run = deepcopy(runs[key])
         # check settings
         if run.settings != run_merged.settings:
             [print(f'Different settings found for {x[0]} ({x[1]} vs. {y[1]})'
                    ) for x, y in zip(run.settings.items(),
                                      run_merged.settings.items()) if x != y]
-            keep_settings = click.confirm(
-                'Would you like to keep the settings for the merged key?',
-                default='Y'
-            )
+            if not quiet:
+                keep_settings = click.confirm(
+                    'Would you like to keep the settings for the merged key?',
+                    default='Y'
+                )
+            else:
+                keep_settings = True
             if not keep_settings:
-                run_merged.settings = run.settings
+                run_merged.settings = deepcopy(run.settings)
         # check folder
         run_merged.folder = [[run.folder, run_merged.folder]
                              if run.folder != run_merged.folder else run.folder]
@@ -811,7 +855,7 @@ def merge_runs(keys, runs, merge_key=''):
         if not all([run.params['E'] == run_merged.params['E'],
                     run.params['TOF'] == run_merged.params['TOF']]):
             print(
-                'Spectra parameters are not the same for'
+                'Spectra parameters are not the same for '
                 f'{run.key} and {run_merged.key}.\n'
                 f'Will keep spectra parameters from {run_merged.key}'
                 ' but will not store any spectra.'
@@ -833,31 +877,39 @@ def merge_runs(keys, runs, merge_key=''):
         # merge params
         print(f'Merging parameters for {run.key} and {run_merged.key}.')
         t_meas = run_merged.t_meas
-        run_merged.params = merge_copy(run.params, run_merged.params)
+        if not keep_settings:
+            run_merged.params = deepcopy(run.params)
+        # run_merged.params = merge_copy(run.params, run_merged.params)
         run_merged.t_meas = t_meas
         run_merged.t_meas += run.t_meas
         # merge data
         for filtered in ['unfiltered', 'filtered']:
-            for run in [run, run_merged]:
-                if 'TOF' not in run.data[filtered]['CH0']:
-                    run.add_tof(filtered=[filtered])
+            for r in [run, run_merged]:
+                if 'TOF' not in r.data[filtered]['CH0']:
+                    r.add_tof(filtered=[filtered])
             run_merged.data[filtered]['CH0'] = pd.concat(
                 [run.data[filtered]['CH0'],
                  run_merged.data[filtered]['CH0']],
                 axis=0
             )
+            print(key,
+                  len(run_merged.data[filtered]['CH0'].index),
+                  len(run.data[filtered]['CH0'].index))
+    run_merged.add_spectra()
     runs[run_merged.key] = run_merged
     return run_merged
 
 
-def merge_related_runs(runs):
+def merge_related_runs(runs, quiet=False):
     """Get list of total run basenames.
 
     Parameters
     ----------
         runs : dict{CompassRun}
             dictionary of compass runs to search for related runs
-
+        quiet : bool
+            flag for whether to prompt user in case of diff settings (False)
+            or to use defaults (True)
     Returns
     -------
     """
@@ -877,7 +929,7 @@ def merge_related_runs(runs):
     for stem, keys in key_stems.items():
         if len(keys) > 1:
             print('\nMerging runs:', ', '.join(str(i) for i in keys))
-            merge_runs(keys, runs, merge_key=stem+'-merged')
+            merge_runs(keys, runs, merge_key=stem+'-merged', quiet=quiet)
             [runs.pop(key) for key in keys]
 
 
@@ -1039,4 +1091,25 @@ if __name__ == '__main__':
             """Do not print additional details about processing data."""
             return
     runs = process_runs(key_tuples)
-    merge_related_runs(runs)
+    merge_related_runs(runs, quiet=True)
+
+    # plot filtered TOF spectra for all keys
+    plt.figure(figsize=(16, 9))
+    for key in runs.keys():
+        print(key)
+        if 'vals' in runs[key].spectra['filtered']['TOF']:
+            vals_raw = np.array(runs[key].spectra['filtered']['TOF']['vals'])
+            bins = np.array(runs[key].spectra['filtered']['TOF']['bins'])
+            t = runs[key].t_meas
+            print('plotting key: ', key, t, sum([i for i in vals_raw]))
+            vals_err = np.sqrt(vals_raw) / t
+            vals = vals_raw / t
+            plt.errorbar(x=bins, y=vals, yerr=vals_err,
+                          marker='s', linestyle='None', drawstyle='steps-mid',
+                          label=key.replace('_', '-'))
+    plt.xlim(25, 185)
+    plt.xlabel(r'TIME [$\mu$s]')
+    plt.ylabel('COUNTS/MINUTE')
+    plt.ylim(0, 3.5)
+    plt.legend()
+    plt.tight_layout()
