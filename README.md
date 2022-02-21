@@ -2,7 +2,7 @@
 
 ## Introduction
 
-CoMPy is a Python package for easily accessing and analyzing data acquired using the CAEN Multi-PArameter Spectroscopy Software (COMPASS).
+CoMPy is a Python package for easily accessing and analyzing data acquired using CAEN Multi-PArameter Spectroscopy Software (COMPASS).
 
 ## Tutorial
 

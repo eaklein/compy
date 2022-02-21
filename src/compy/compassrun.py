@@ -4,11 +4,11 @@ Created on Tue Oct 26 11:46:40 2021
 @author: E. A. Klein
 """
 
-import os
 from bisect import bisect_left
 from copy import deepcopy
 import struct
 from pprint import pprint
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -26,7 +26,6 @@ plt.rcParams.update({'font.size': 20})
 plt.rcParams['text.usetex'] = True
 plt.rcParams['xtick.direction'] = 'in'
 plt.rcParams['ytick.direction'] = 'in'
-
 
 class CompassRun:
     """
@@ -76,7 +75,7 @@ class CompassRun:
     """
 
     def __init__(self, key, params=None, settings=None, spectra=None, data=None,
-                 t_meas=0., file_fmt='',
+                 t_meas=0., file_fmt='.csv',
                  folder='C:/Users/Avram/Dropbox (MIT)/Resonances/data/CoMPASS/'):
         """Constructs all the necessary attributes for the compassRun class.
 
@@ -115,7 +114,7 @@ class CompassRun:
         if self.settings is None:
             self.settings = {}
         try:
-            xml_fname = self.folder + self.key + '/settings.xml'
+            xml_fname = Path(self.folder + self.key + '/settings.xml')
             with open(xml_fname) as f:
                 settings_xml = xmltodict.parse(f.read())
             # read board parameters
@@ -141,7 +140,7 @@ class CompassRun:
                 ['fileFormatList']
                 )
         except FileNotFoundError:
-            verboseprint(
+            print(
                 f'WARNING: Settings file could not be found for {self.key} '
                 f'at {xml_fname}'
             )
@@ -179,7 +178,7 @@ class CompassRun:
             self.params[filt_key] = {}
             folder_filt = self.folder + self.key + '/' + filt_upper + '/'
             try:
-                os.listdir(folder_filt)
+                Path(folder_filt).glob("*")
             except WindowsError:
                 print(
                     f'WARNING: Cannot find {filt_upper} folder for {self.key}.'
@@ -187,28 +186,28 @@ class CompassRun:
                 break
             # read raw CH0 data location
             self.params[filt_key]['file_CH0'] = [
-                file for file in os.listdir(folder_filt)
-                if file.endswith(file_fmt) and ('CH0' in file)
-            ]
+		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if 
+		'CH0' in str(file)
+	    ]
             # read raw CH1 data location
             self.params[filt_key]['file_CH1'] = [
-                file for file in os.listdir(folder_filt)
-                if file.endswith(file_fmt) and ('CH1' in file)
-            ]
+		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if 
+		'CH1' in str(file)
+	    ]
             # read saved TOF spectra location
             self.params[filt_key]['file_data_TOF'] = [
-                file for file in os.listdir(folder_filt)
-                if file.endswith(".txt") and ('TOF' in file)
-            ]
+		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if 
+		'TOF' in str(file)
+	    ]
             # read saved E spectra location
             self.params[filt_key]['file_data_E'] = [
-                file for file in os.listdir(folder_filt)
-                if file.endswith(".txt") and ('CH0' in file) and ('E' in file)
+		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if 
+		('CH0' in str(file)) and ('E' in str(file))
             ]
             # read saved PSD spectra location
             self.params[filt_key]['file_data_PSD'] = [
-                file for file in os.listdir(folder_filt)
-                if file.endswith(".txt") and ('CH0' in file) and ('PSD' in file)
+                str(file) for file in Path(folder_filt).glob('*' + file_fmt) if 
+		('CH0' in str(file)) and ('PSD' in str(file))
             ]
 
     def read_spectra(self, filtered=['unfiltered', 'filtered'],
@@ -250,8 +249,8 @@ class CompassRun:
                         self.spectra[filt_key][mode]['bins'] = np.arange(
                             self.params[mode]['n_bins']
                         )
-                    verboseprint('Read in CoMPASS spectrum for '
-                                 f'{self.key} (mode: {mode}, {filt_key})')
+                    verbose('Read in CoMPASS spectrum for '
+                            f'{self.key} (mode: {mode}, {filt_key})')
 
 
     def add_spectra(self, filtered=['unfiltered', 'filtered'],
@@ -324,10 +323,8 @@ class CompassRun:
             self.data[filt_key] = {}
             # attempt to read Ch.0 (detector) data if it exists
             if len(self.params[filt_key]['file_CH0']) > 0:
-                verboseprint(
-                    f'Reading {filt_key} CH0 data for key: {self.key}...',
-                    end=""
-                )
+                verbose(f'Reading {filt_key} CH0 data for key: {self.key}...',
+			end="")
                 try:
                     if file_fmt == '.csv':
                         self.data[filt_key]['CH0'] = pd.read_csv(
@@ -360,7 +357,7 @@ class CompassRun:
                 if 'TOF' in self.data[filt_key]['CH0']:
                     continue
                 if len(self.params[filt_key]['file_CH1']) > 0:
-                    verboseprint(
+                    verbose(
                         f'Reading {filt_key} CH1 data for key: {self.key}...',
                         end=""
                     )
@@ -388,13 +385,11 @@ class CompassRun:
                     else:
                         print("Done!")
                 else:
-                    verboseprint(
-                        f'Did not find {filt_key} CH1 data for key: {self.key}.'
-                    )
+                    print('Did not find {filt_key} CH1 data for key: '
+			  f'{self.key}.')
             else:
-                verboseprint(
-                    f'Did not find {filt_key} CH0 data for key: {self.key}.'
-                )
+                print('Did not find {filt_key} CH0 data for key: '
+		      f'{self.key}.')
 
     def add_tof(self, filtered=['unfiltered', 'filtered']):
         """Add TOF column to raw data dataframe.
@@ -406,19 +401,20 @@ class CompassRun:
         """
         for filt_key in filtered:
             # check if un-/filtered CH0 data present and TOF not yet calculated
-            if ('CH0' in self.data[filt_key]) and (
+            if (filt_key in self.data) and (
+		    'CH0' in self.data[filt_key]) and (
                     'TOF' in self.data[filt_key]['CH0']):
                 print('TOF already calculated!')
+            elif filt_key not in self.data:
+                print(f'Could not calculate TOF. No {filt_key} data found!')
             elif 'CH0' not in self.data[filt_key]:
-                print('Could not calculate TOF. Ch.0 data not found!')
+                print('Could not calculate TOF. No {filt_key} Ch.0 data found!')
             else:
                 # attempt to read in Channel 1 (pulse) data if not yet done
                 if ((len(self.params[filt_key]['file_CH1']) > 0) and
                         not(('CH1' not in self.data[filt_key])
                             or self.data[filt_key]['CH1'].empty)):
-                    verboseprint(
-                        f'Reading {filt_key} CH1 data for key: {self.key}.'
-                    )
+                    verbose(f'Reading {filt_key} CH1 data for key: {self.key}.')
                     try:
                         self.data[filt_key]['CH1'] = pd.read_csv(
                             self.folder + self.key + '/'
@@ -438,9 +434,7 @@ class CompassRun:
                 if (all((not self.data[filt_key][ch].empty) and
                         ('TIMETAG' in self.data[filt_key][ch]))
                         for ch in ['CH0', 'CH1']):
-                    verboseprint(
-                        f'Calculating {filt_key} TOF for {self.key}'
-                    )
+                    verbose(f'Calculating {filt_key} TOF for {self.key}')
                     try:
                         # calculate TOF using TIMETAG info
                         self.data[filt_key]['CH0']['TOF'] = calc_TOF(
@@ -485,9 +479,7 @@ class CompassRun:
             else:
                 # check that CH0 is not empty
                 if not self.data[filt_key]['CH0'].empty:
-                    verboseprint(
-                        f'Calculating {filt_key} PSD for {self.key}'
-                    )
+                    verbose(f'Calculating {filt_key} PSD for {self.key}')
                     try:
                         # calculate PSD
                         data = self.data[filt_key]['CH0']
@@ -583,7 +575,7 @@ class CompassRun:
             try:
                 x = self.data[filtered]['CH0'].TOF
             except:
-                verboseprint(f'No TOF data to plot for {self.key}!')
+                print(f'No TOF data to plot for {self.key}!')
                 return
             if not add:
                 plt.figure(figsize=(16, 9))
@@ -602,7 +594,7 @@ class CompassRun:
             plt.xlabel('TIME (us)')
             plt.tight_layout()
         else:
-            verboseprint(f'No {filtered} CH0 data found for {self.key}!')
+            print(f'No {filtered} CH0 data found for {self.key}!')
 
     def plot_spectrum(self, mode='TOF', filtered='unfiltered', add=False):
         """Plot spectrum auto-generated by CoMPASS.
@@ -694,15 +686,24 @@ def initialize(folders=None, keys=None):
             if not new_folder:
                 break
             try:
-                os.listdir(new_folder)
+                Path(new_folder).glob("*")
                 folders.append(new_folder)
             except FileNotFoundError:
                 print('The system cannot find the specified folder. '
                       'Please select another folder.')
     if keys is None:
         keys = select_keys(folders)
-    verbose = click.confirm('\nVerbose Mode?', default=True)
-    return folders, keys, verbose
+    verbose_flag = click.confirm('\nVerbose Mode?', default=True)
+    global verbose
+    if verbose_flag:
+        def verbose(*args, **kwargs):
+            """Print additional details about processing data."""
+            print(*args, **kwargs)
+    else:
+        def verbose(*args, **kwargs):
+            """Do not print additional details about processing data."""
+            return
+    return folders, keys, verbose_flag
 
 
 def select_keys(folders):
@@ -723,8 +724,8 @@ def select_keys(folders):
     for i, folder in enumerate(folders):
         # folder_key = folder.rsplit('/', maxsplit=3)[1]
         # keys_select[folder_key] = []
-        keys_folder = [item for item in os.listdir(folder)
-                       if os.path.isdir(os.path.join(folder, item))]
+        keys_folder = [item.name for item in Path(folder).glob("*")
+                       if Path(folder, item.name).is_dir()]
         print('\nAvailable keys to process are: ')
         pprint(keys_folder, compact=True)
         bool_all = click.confirm('\nWould you like to process all keys?',
@@ -1076,40 +1077,3 @@ def plot_trans(runs, key_target, key_open,
     plt.tight_layout()
     return vals_trans, vals_errs, bins
 
-
-if __name__ == '__main__':
-    folders = ['C:/Users/Avram/Dropbox (MIT)/MIT/research/NRTA/Experiments/du-studies/DAQ/',
-               # 'C:/Users/Avram/Dropbox (MIT)/Resonances/data/CoMPASS/20210531/DAQ/',
-               'C:/Users/Avram/Dropbox (MIT)/MIT/research/NRTA/Experiments/IAP-2022/DAQ/']
-    folder, key_tuples, VERBOSE = initialize(folders=folders)
-    if VERBOSE:
-        def verboseprint(*args, **kwargs):
-            """Print additional details about processing data."""
-            print(*args, **kwargs)
-    else:
-        def verboseprint(*args, **kwargs):
-            """Do not print additional details about processing data."""
-            return
-    runs = process_runs(key_tuples)
-    merge_related_runs(runs, quiet=True)
-
-    # plot filtered TOF spectra for all keys
-    plt.figure(figsize=(16, 9))
-    for key in runs.keys():
-        print(key)
-        if 'vals' in runs[key].spectra['filtered']['TOF']:
-            vals_raw = np.array(runs[key].spectra['filtered']['TOF']['vals'])
-            bins = np.array(runs[key].spectra['filtered']['TOF']['bins'])
-            t = runs[key].t_meas
-            print('plotting key: ', key, t, sum([i for i in vals_raw]))
-            vals_err = np.sqrt(vals_raw) / t
-            vals = vals_raw / t
-            plt.errorbar(x=bins, y=vals, yerr=vals_err,
-                          marker='s', linestyle='None', drawstyle='steps-mid',
-                          label=key.replace('_', '-'))
-    plt.xlim(25, 185)
-    plt.xlabel(r'TIME [$\mu$s]')
-    plt.ylabel('COUNTS/MINUTE')
-    plt.ylim(0, 3.5)
-    plt.legend()
-    plt.tight_layout()

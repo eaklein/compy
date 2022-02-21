@@ -1,6 +1,6 @@
 import setuptools
 
-with open("README.md", "r", encoding="utf-8") as fh:
+with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
@@ -22,5 +22,18 @@ setuptools.setup(
     ],
     package_dir={"": "src"},
     packages=setuptools.find_packages(where="src"),
+    entry_points = {
+        'console_scripts': [
+            'compy-run=compy.compy_script:main'
+        ],
+    },
+    install_requires=[
+        'xmltodict',
+        'click',
+        'numpy',
+        'matplotlib',
+	'numpy',
+	'pandas'
+    ],
     python_requires=">=3.6",
 )
