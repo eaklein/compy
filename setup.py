@@ -4,7 +4,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="CoMPy",
+    name="compy",
     version="1.0",
     author="E. A. Klein",
     author_email="eklein@mit.edu",
