@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import click
 import xmltodict
+import pickle
 # from scipy.stats import gaussian_kde
 
 # set plotting environment
@@ -113,6 +114,10 @@ class CompassRun:
         """
         if self.settings is None:
             self.settings = {}
+        if self.params is None:
+            self.params = {}
+        for filt_key in ['unfiltered', 'filtered']:
+            self.params[filt_key] = {}
         try:
             xml_fname = Path(self.folder + self.key + '/settings.xml')
             with open(xml_fname) as f:
@@ -141,13 +146,11 @@ class CompassRun:
                 )
         except FileNotFoundError:
             print(
-                f'WARNING: Settings file could not be found for {self.key} '
+                f'ERROR: Settings file could not be found for {self.key} '
                 f'at {xml_fname}'
             )
-            return
+            return -1
         # store certain settings in params dictionary
-        if self.params is None:
-            self.params = {}
         # read parameters for TOF spectra
         self.params['TOF'] = {}
         self.params['TOF']['n_bins'] = int(float(
@@ -186,27 +189,27 @@ class CompassRun:
                 break
             # read raw CH0 data location
             self.params[filt_key]['file_CH0'] = [
-		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if 
+		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if
 		'CH0' in str(file)
 	    ]
             # read raw CH1 data location
             self.params[filt_key]['file_CH1'] = [
-		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if 
+		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if
 		'CH1' in str(file)
 	    ]
             # read saved TOF spectra location
             self.params[filt_key]['file_data_TOF'] = [
-		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if 
+		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if
 		'TOF' in str(file)
 	    ]
             # read saved E spectra location
             self.params[filt_key]['file_data_E'] = [
-		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if 
+		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if
 		('CH0' in str(file)) and ('E' in str(file))
             ]
             # read saved PSD spectra location
             self.params[filt_key]['file_data_PSD'] = [
-                str(file) for file in Path(folder_filt).glob('*' + file_fmt) if 
+                str(file) for file in Path(folder_filt).glob('*' + file_fmt) if
 		('CH0' in str(file)) and ('PSD' in str(file))
             ]
 
@@ -227,7 +230,7 @@ class CompassRun:
             self.spectra[filt_key] = {}
             for mode in modes:
                 key_data = 'file_data_' + mode
-                if self.params[filt_key][key_data]:
+                if key_data in self.params[filt_key]:
                     self.spectra[filt_key][mode] = {}
                     try:
                         self.spectra[filt_key][mode]['vals'] = np.array(
@@ -322,7 +325,7 @@ class CompassRun:
         for filt_key in filtered:
             self.data[filt_key] = {}
             # attempt to read Ch.0 (detector) data if it exists
-            if len(self.params[filt_key]['file_CH0']) > 0:
+            if 'file_CH0' in self.params[filt_key]:
                 verbose(f'Reading {filt_key} CH0 data for key: {self.key}...',
 			end="")
                 try:
@@ -385,10 +388,10 @@ class CompassRun:
                     else:
                         print("Done!")
                 else:
-                    print('Did not find {filt_key} CH1 data for key: '
+                    print(f'Did not find {filt_key} CH1 data for key: '
 			  f'{self.key}.')
             else:
-                print('Did not find {filt_key} CH0 data for key: '
+                print(f'Did not find {filt_key} CH0 data for key: '
 		      f'{self.key}.')
 
     def add_tof(self, filtered=['unfiltered', 'filtered']):
@@ -681,16 +684,24 @@ def initialize(folders=None, keys=None):
     if folders is None:
         folders = []
         while True:
-            new_folder = input('Please enter a project folder path '
+            new_folder = input('\nPlease enter a project folder path '
                            '(ending in DAQ):\n')
-            if not new_folder:
+            if (not new_folder) and (len(folders) == 0):
+                print('You must enter at least one valid folder name!')
+                continue
+            elif not new_folder:
                 break
             try:
-                Path(new_folder).glob("*")
-                folders.append(new_folder)
-            except FileNotFoundError:
+                Path(new_folder).resolve()
+            except:
                 print('The system cannot find the specified folder. '
                       'Please select another folder.')
+            if (Path(new_folder).is_dir()) and (new_folder.endswith('DAQ')):
+                folder_name = str(Path(new_folder).resolve())
+                folders.append(folder_name)
+                print(f'appending {folder_name}...')
+            else:
+                print(f'{new_folder} is not a valid CoMPASS directory.')
     if keys is None:
         keys = select_keys(folders)
     verbose_flag = click.confirm('\nVerbose Mode?', default=True)
@@ -944,7 +955,9 @@ def process_runs(key_tuples, runs=None):
         if key != 'CoMPASS':
             print('\n' + f'Processing Key: {key}...')
             run = CompassRun(key=key, folder=folder)
-            run.read_settings()
+            err = run.read_settings()
+            if err == -1:
+                continue
             run.read_data()
             run.read_spectra()
             if bool_TOF:
@@ -1077,3 +1090,21 @@ def plot_trans(runs, key_target, key_open,
     plt.tight_layout()
     return vals_trans, vals_errs, bins
 
+def load_pickle(fname=None):
+    """Save dictionary of CoMPASS runs as pickle."""
+    if fname is None:
+        fname = input('What is the name of the pickle file to load?:\n')
+    if not fname.endswith('.pkl'):
+        fname += '.pkl'
+    with open(fname, 'rb') as file:
+        data = pickle.load(file)
+    return data
+
+def save_pickle(runs, fname=None):
+    """Save dictionary of CoMPASS runs as pickle."""
+    if fname is None:
+        fname = input('What filename would you like to store pickle?:\n')
+    if not fname.endswith('.pkl'):
+        fname += '.pkl'
+    with open(fname, 'wb') as file:
+        pickle.dump(runs, file, protocol=pickle.HIGHEST_PROTOCOL)
