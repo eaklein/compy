@@ -11,7 +11,8 @@ import matplotlib.pyplot as plt
 
 import click
 
-from compy import compassrun
+from compy import compassrun, utilities
+
 
 def main():
     """Process user-selected runs and plot filtered TOF spectra."""
@@ -27,11 +28,11 @@ def main():
     pkl_flag = click.confirm('\nWould you like to load data from pickle?',
                              default=False)
     if pkl_flag:
-        runs = compassrun.load_pickle()
+        runs = utilities.load_pickle()
     else:
         folder, key_tuples, VERBOSE = compassrun.initialize(folders=folders)
         runs = compassrun.process_runs(key_tuples)
-        compassrun.merge_related_runs(runs, quiet=True)
+        utilities.merge_related_runs(runs, quiet=True)
 
     # plot filtered TOF spectra for all keys
     print_flag = click.confirm('\nWould you like to plot the spectra?',
@@ -64,5 +65,5 @@ def main():
     save_flag = click.confirm('\nWould you like to save the runs as a pickle?',
                               default=True)
     if save_flag:
-        compassrun.save_pickle(runs)
-    print('Thank you for using compy, the CoMPASS Python Companion!')
+        utilities.save_pickle(runs)
+    print('\nThank you for using compy, the CoMPASS Python Companion!')
