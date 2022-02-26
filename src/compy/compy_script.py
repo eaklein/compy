@@ -3,12 +3,14 @@
 """
 A command line script for processing CoMPASS data
 """
-
+import os
+# os.chdir('/mnt/c/Users/Avram/Dropbox (MIT)/MIT/research/NRTA/experiments/')
 import sys
 from pathlib import Path
 import numpy as np
+import matplotlib
+#matplotlib.use("Qt5Agg")
 import matplotlib.pyplot as plt
-
 import click
 
 from compy import compassrun, utilities
@@ -18,11 +20,12 @@ def main():
     """Process user-selected runs and plot filtered TOF spectra."""
     args = sys.argv[1:]
     argc = len(args)
-    if argc > 0:
-        folders = [str(Path(arg).resolve()) for arg in args]
-        print(folders)
-    else:
-        folders = None
+    # if argc > 0:
+    #     folders = [str(Path(arg).resolve()) for arg in args]
+    #     print(f'Folders specified: {folders}')
+    # else:
+    #     folders = None
+    folders = None
 
     # process data
     pkl_flag = click.confirm('\nWould you like to load data from pickle?',
@@ -30,7 +33,7 @@ def main():
     if pkl_flag:
         runs = utilities.load_pickle()
     else:
-        folder, key_tuples, VERBOSE = compassrun.initialize(folders=folders)
+        key_tuples, VERBOSE = compassrun.initialize(folders=folders)
         runs = compassrun.process_runs(key_tuples)
         utilities.merge_related_runs(runs, quiet=True)
 
@@ -41,7 +44,8 @@ def main():
         plt.figure(figsize=(16, 9))
         for key in runs.keys():
             print(key)
-            if 'vals' in runs[key].spectra['filtered']['TOF']:
+            if ('TOF' in runs[key].spectra['filtered']) and (
+                'vals' in runs[key].spectra['filtered']['TOF']):
                 vals_raw = np.array(runs[key].spectra['filtered']['TOF']['vals'])
                 bins = np.array(runs[key].spectra['filtered']['TOF']['bins'])
                 t = runs[key].t_meas
@@ -58,6 +62,7 @@ def main():
             plt.ylim(0, 3.5)
             plt.legend()
             plt.tight_layout()
+            plt.show()
         else:
             print('No spectra found to plot!')
 

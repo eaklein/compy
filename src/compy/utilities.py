@@ -6,6 +6,7 @@ Created on Thu Feb 24 15:21:38 2022
 
 from bisect import bisect_left
 from copy import deepcopy
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -295,5 +296,17 @@ def save_pickle(runs, fname=None):
         fname = input('What filename would you like to store pickle?:\n')
     if not fname.endswith('.pkl'):
         fname += '.pkl'
+    if not runs.keys():
+        print('No runs found!')
+        return
+    folder_default = Path(runs[list(runs.keys())[0]].folder).parent
+    folder_save = click.confirm(
+                    f'Would you like to save to {folder_default}?',
+                    default='Y'
+                )
+    if folder_save:
+        fname = folder_default / fname
+    else:
+        fname = input('What folder would you like to save to?:\n') + '/' + fname
     with open(fname, 'wb') as file:
         pickle.dump(runs, file, protocol=pickle.HIGHEST_PROTOCOL)

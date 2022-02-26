@@ -116,7 +116,7 @@ class CompassRun:
         for filt_key in ['unfiltered', 'filtered']:
             self.params[filt_key] = {}
         try:
-            xml_fname = Path(self.folder + self.key + '/settings.xml')
+            xml_fname = Path(self.folder) / self.key / 'settings.xml'
             with open(xml_fname) as f:
                 settings_xml = xmltodict.parse(f.read())
             # read board parameters
@@ -172,42 +172,44 @@ class CompassRun:
             self.settings['SW_PARAMETER_PSDBINCOUNT']
         ))
         # read files from run directory
+        print('Reading files from directory.')
         file_fmt = '.' + self.file_fmt.lower()
         for filt_key in ['unfiltered', 'filtered']:
             filt_upper = filt_key.upper()
             self.params[filt_key] = {}
-            folder_filt = self.folder + self.key + '/' + filt_upper + '/'
+            folder_filt = Path(self.folder) / self.key / filt_upper
             try:
-                Path(folder_filt).glob("*")
-            except WindowsError:
+                folder_filt.glob("*")
+            except OSError:
                 print(
                     f'WARNING: Cannot find {filt_upper} folder for {self.key}.'
                 )
                 break
             # read raw CH0 data location
+            [print(str(file)) for file in Path(folder_filt).glob('*' + file_fmt)]
             self.params[filt_key]['file_CH0'] = [
-		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if
-		'CH0' in str(file)
-	    ]
+		        str(file) for file in Path(folder_filt).glob('*' + file_fmt) if
+		        'CH0' in str(file)
+	        ]
             # read raw CH1 data location
             self.params[filt_key]['file_CH1'] = [
-		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if
-		'CH1' in str(file)
-	    ]
+		        str(file) for file in Path(folder_filt).glob('*' + file_fmt) if
+		        'CH1' in str(file)
+	        ]
             # read saved TOF spectra location
             self.params[filt_key]['file_data_TOF'] = [
-		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if
-		'TOF' in str(file)
-	    ]
+		        str(file) for file in Path(folder_filt).glob('*' + file_fmt) if
+		        'TOF' in str(file)
+	        ]
             # read saved E spectra location
             self.params[filt_key]['file_data_E'] = [
-		str(file) for file in Path(folder_filt).glob('*' + file_fmt) if
-		('CH0' in str(file)) and ('E' in str(file))
+		        str(file) for file in Path(folder_filt).glob('*' + file_fmt) if
+		        ('CH0' in str(file)) and ('E' in str(file))
             ]
             # read saved PSD spectra location
             self.params[filt_key]['file_data_PSD'] = [
                 str(file) for file in Path(folder_filt).glob('*' + file_fmt) if
-		('CH0' in str(file)) and ('PSD' in str(file))
+		        ('CH0' in str(file)) and ('PSD' in str(file))
             ]
 
     def read_spectra(self, filtered=['unfiltered', 'filtered'],
@@ -231,9 +233,10 @@ class CompassRun:
                     self.spectra[filt_key][mode] = {}
                     try:
                         self.spectra[filt_key][mode]['vals'] = np.array(
-                            np.loadtxt(self.folder + self.key + '/'
-                                       + filt_key.upper() + '/'
-                                       + max(self.params[filt_key][key_data]))
+                            np.loadtxt(
+                                Path(self.folder) / self.key / filt_key.upper() /
+                                max(self.params[filt_key][key_data])
+                            )
                         )
                     except:
                         print('WARNING: unable to open CoMPASS histogram for '
@@ -326,18 +329,15 @@ class CompassRun:
                 verbose(f'Reading {filt_key} CH0 data for key: {self.key}...',
 			end="")
                 try:
+                    print(self.folder, self.key)
+                    fname = (Path(self.folder) / self.key / filt_key.upper() /
+                                self.params[filt_key]['file_CH0'][0])
+                    print(fname)
                     if file_fmt == '.csv':
-                        self.data[filt_key]['CH0'] = pd.read_csv(
-                            self.folder + self.key + '/'
-                            + filt_key.upper() + '/'
-                            + self.params[filt_key]['file_CH0'][0],
-                            sep=';', on_bad_lines='skip'
-                        )
+                        self.data[filt_key]['CH0'] = pd.read_csv(fname,
+                            sep=';', on_bad_lines='skip')
                     elif file_fmt == 'bin':
-                        with open(self.folder + self.key + '/'
-                                  + filt_key.upper() + '/'
-                                  + self.params[filt_key]['file_CH0'][0],
-                                  "rb") as f:
+                        with open(fname, "rb") as f:
                             byte = f.read()
                         data = struct.unpack(('<'+'HHQHHII'*(len(byte)//24)),
                                              byte)
@@ -361,18 +361,14 @@ class CompassRun:
                         f'Reading {filt_key} CH1 data for key: {self.key}...',
                         end=""
                     )
+                    fname = (Path(self.folder) / self.key / filt_key.upper() /
+                                self.params[filt_key]['file_CH1'][0])
                     if file_fmt == '.csv':
                         self.data[filt_key]['CH1'] = pd.read_csv(
-                            self.folder + self.key + '/'
-                            + filt_key.upper() + '/'
-                            + self.params[filt_key]['file_CH0'][0],
-                            sep=';', on_bad_lines='skip'
+                            fname, sep=';', on_bad_lines='skip'
                         )
                     elif file_fmt == 'bin':
-                        with open(self.folder + self.key + '/'
-                                    + filt_key.upper() + '/'
-                                    + self.params[filt_key]['file_CH1'][0],
-                                    "rb") as f:
+                        with open(fname, "rb") as f:
                             byte = f.read()
                         data = struct.unpack(('<'+'HHQHHII'*(len(byte)//24)),
                                              byte)
@@ -408,19 +404,18 @@ class CompassRun:
             elif filt_key not in self.data:
                 print(f'Could not calculate TOF. No {filt_key} data found!')
             elif 'CH0' not in self.data[filt_key]:
-                print('Could not calculate TOF. No {filt_key} Ch.0 data found!')
+                print(f'Could not calculate TOF. No {filt_key} Ch.0 data found!')
             else:
                 # attempt to read in Channel 1 (pulse) data if not yet done
                 if ((len(self.params[filt_key]['file_CH1']) > 0) and
                         not(('CH1' not in self.data[filt_key])
                             or self.data[filt_key]['CH1'].empty)):
                     verbose(f'Reading {filt_key} CH1 data for key: {self.key}.')
+                    fname = (Path(self.folder) / self.key / filt_key.upper() /
+                             self.params[filt_key]['file_CH1'][0])
                     try:
                         self.data[filt_key]['CH1'] = pd.read_csv(
-                            self.folder + self.key + '/'
-                            + filt_key.upper() + '/'
-                            + self.params[filt_key]['file_CH1'][0],
-                            sep=';', on_bad_lines='skip'
+                            fname, sep=';', on_bad_lines='skip'
                         )
                     except:
                         print(f'ERROR: unable to read in {filt_key} CH1 data '
@@ -446,12 +441,10 @@ class CompassRun:
                         break
                     try:
                         # rewrite CH0 csv file with TOF added
-                        self.data[filt_key]['CH0'].to_csv(
-                            self.folder + self.key + '/'
-                            + filt_key.upper() + '/'
-                            + self.params[filt_key]['file_CH0'][0],
-                            sep=';', index=False
-                        )
+                        fname = (Path(self.folder) / self.key / filt_key.upper()
+                                 / self.params[filt_key]['file_CH0'][0])
+                        self.data[filt_key]['CH0'].to_csv(fname, sep=';', 
+                                                          index=False)
                     except:
                         print('ERROR: issue arose writing TOF to file.')
                         break
@@ -495,14 +488,12 @@ class CompassRun:
                             default=False
                         )
                     if file_write:
+                        fname = (Path(self.folder) / self.key / filt_key.upper()
+                                 / self.params[filt_key]['file_CH0'][0])
                         try:
                             # rewrite CH0 csv file with PSD added
-                            self.data[filt_key]['CH0'].to_csv(
-                                self.folder + self.key + '/'
-                                + filt_key.upper() + '/'
-                                + self.params[filt_key]['file_CH0'][0],
-                                sep=';', index=False
-                            )
+                            self.data[filt_key]['CH0'].to_csv(fname, sep=';', 
+                                                              index=False)
                         except:
                             print('ERROR: issue arose writing PSD to file.')
                             break
@@ -683,6 +674,8 @@ def initialize(folders=None, keys=None):
         while True:
             new_folder = input('\nPlease enter a project folder path '
                            '(ending in DAQ):\n')
+            if new_folder and not new_folder.endswith('/DAQ'):
+                new_folder += '/DAQ'
             if (not new_folder) and (len(folders) == 0):
                 print('You must enter at least one valid folder name!')
                 continue
@@ -711,7 +704,7 @@ def initialize(folders=None, keys=None):
         def verbose(*args, **kwargs):
             """Do not print additional details about processing data."""
             return
-    return folders, keys, verbose_flag
+    return keys, verbose_flag
 
 
 def select_keys(folders):
@@ -737,7 +730,7 @@ def select_keys(folders):
         print('\nAvailable keys to process are: ')
         pprint(keys_folder, compact=True)
         bool_all = click.confirm('\nWould you like to process all keys?',
-                                 default=True)
+                                 default=False)
         # process all runs
         if bool_all:
             keys_new = [(key, folder) for key in keys_folder]
@@ -745,12 +738,12 @@ def select_keys(folders):
             continue
         # manually select runs
         bool_date = click.confirm('\nWould you like to process by date?',
-                                  default=True)
+                                  default=False)
         if not bool_date:
             while True:
                 n_keys = len(keys_select)
                 key_input = input(
-                    'Type \'options\' to see all available options.'
+                    '\nType \'options\' to see all available options.'
                     '\nPress \'enter\' to end key selection.'
                     '\nEnter key name: '
                 )
