@@ -310,3 +310,4 @@ def save_pickle(runs, fname=None):
         fname = input('What folder would you like to save to?:\n') + '/' + fname
     with open(fname, 'wb') as file:
         pickle.dump(runs, file, protocol=pickle.HIGHEST_PROTOCOL)
+        

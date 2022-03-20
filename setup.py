@@ -11,9 +11,9 @@ setuptools.setup(
     description="A package for reading CoMPASS directories into Python",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/eaklein/CoMPy",
+    url="https://github.com/eaklein/compy",
     project_urls={
-        "Bug Tracker": "https://github.com/eaklein/CoMPy/issues",
+        "Bug Tracker": "https://github.com/eaklein/compy/issues",
     },
     classifiers=[
         "Programming Language :: Python :: 3",

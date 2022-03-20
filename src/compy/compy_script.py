@@ -4,28 +4,26 @@
 A command line script for processing CoMPASS data
 """
 import os
-# os.chdir('/mnt/c/Users/Avram/Dropbox (MIT)/MIT/research/NRTA/experiments/')
 import sys
 from pathlib import Path
 import numpy as np
-import matplotlib
-#matplotlib.use("Qt5Agg")
 import matplotlib.pyplot as plt
 import click
 
 from compy import compassrun, utilities
+
+os.chdir('/mnt/c/Users/Avram/Dropbox (MIT)/MIT/research/NRTA/experiments/')
 
 
 def main():
     """Process user-selected runs and plot filtered TOF spectra."""
     args = sys.argv[1:]
     argc = len(args)
-    # if argc > 0:
-    #     folders = [str(Path(arg).resolve()) for arg in args]
-    #     print(f'Folders specified: {folders}')
-    # else:
-    #     folders = None
-    folders = None
+    if argc > 0:
+        folders = [str(Path(arg).resolve()) for arg in args]
+        print(f'Folders specified: {folders}')
+    else:
+        folders = None
 
     # process data
     pkl_flag = click.confirm('\nWould you like to load data from pickle?',
@@ -39,13 +37,13 @@ def main():
 
     # plot filtered TOF spectra for all keys
     print_flag = click.confirm('\nWould you like to plot the spectra?',
-                             default=True)
+                               default=True)
     if print_flag:
         plt.figure(figsize=(16, 9))
         for key in runs.keys():
             print(key)
             if ('TOF' in runs[key].spectra['filtered']) and (
-                'vals' in runs[key].spectra['filtered']['TOF']):
+                    'vals' in runs[key].spectra['filtered']['TOF']):
                 vals_raw = np.array(runs[key].spectra['filtered']['TOF']['vals'])
                 bins = np.array(runs[key].spectra['filtered']['TOF']['bins'])
                 t = runs[key].t_meas
@@ -53,8 +51,9 @@ def main():
                 vals_err = np.sqrt(vals_raw) / t
                 vals = vals_raw / t
                 plt.errorbar(x=bins, y=vals, yerr=vals_err,
-                              marker='s', linestyle='None', drawstyle='steps-mid',
-                              label=key.replace('_', '-'))
+                             marker='s', linestyle='None',
+                             drawstyle='steps-mid',
+                             label=key.replace('_', '-'))
         if len(runs.keys()) > 0:
             plt.xlim(25, 185)
             plt.xlabel(r'TIME [$\mu$s]')
@@ -72,3 +71,7 @@ def main():
     if save_flag:
         utilities.save_pickle(runs)
     print('\nThank you for using compy, the CoMPASS Python Companion!')
+
+
+if __name__ == '__main__':
+    main()
