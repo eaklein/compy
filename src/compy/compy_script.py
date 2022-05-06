@@ -12,9 +12,6 @@ import click
 
 from compy import compassrun, utilities
 
-os.chdir('/mnt/c/Users/Avram/Dropbox (MIT)/MIT/research/NRTA/experiments/')
-
-
 def main():
     """Process user-selected runs and plot filtered TOF spectra."""
     args = sys.argv[1:]
@@ -33,7 +30,10 @@ def main():
     else:
         key_tuples, VERBOSE = compassrun.initialize(folders=folders)
         runs = compassrun.process_runs(key_tuples)
-        utilities.merge_related_runs(runs, quiet=True)
+        merge_flag = click.confirm('\nWould you like to merge runs?',
+                                   default=False)
+        if merge_flag:
+            utilities.merge_related_runs(runs, quiet=True)
 
     # plot filtered TOF spectra for all keys
     print_flag = click.confirm('\nWould you like to plot the spectra?',
@@ -71,7 +71,8 @@ def main():
     if save_flag:
         utilities.save_pickle(runs)
     print('\nThank you for using compy, the CoMPASS Python Companion!')
-
+    return runs
 
 if __name__ == '__main__':
-    main()
+    os.chdir('/mnt/c/Users/Avram/Dropbox (MIT)/MIT/research/NRTA/experiments/')
+    runs = main()
