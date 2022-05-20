@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import click
 import pickle
+from scipy.stats import gaussian_kde
 
 
 def merge_copy(d1, d2):
@@ -314,6 +315,9 @@ def plot_trans(
     n_bins=400,
     t_offset=10.0,
     color="black",
+    plot_kde=False,
+    color_kde="blue",
+    kde_bw=0.005,
     add_plot=False,
 ):
     """Calculate transmission and plot."""
@@ -329,19 +333,41 @@ def plot_trans(
     vals_trans, vals_errs = calc_trans(
         counts_in, counts_out, t_meas_in, t_meas_out
     )
+    lw = 2
     if not add_plot:
         plt.figure(figsize=(16, 9))
+    if plot_kde:
+        kde_in = gaussian_kde(target_in, bw_method=kde_bw)
+        kde_out = gaussian_kde(target_out, bw_method=kde_bw)
+        t_lin = np.linspace(t_lo, t_hi, int((t_hi-t_lo)/0.1) + 1)
+        trans_kde, __ = calc_trans(
+            kde_in.evaluate(t_lin)*len(target_in),
+            kde_out.evaluate(t_lin)*len(target_out),
+            t_meas_in,
+            t_meas_out
+        )
+        plt.plot(
+            t_lin - t_offset,
+            trans_kde,
+            lw=2,
+            color=color_kde,
+            label=key_target + " transmission (KDE)",
+            zorder=10
+        )
+        lw = 1
     plt.errorbar(
         x=bins,
         y=vals_trans,
         yerr=vals_errs,
-        lw=2,
+        lw=lw,
+        drawstyle='steps-mid',
         elinewidth=0.5,
         capsize=1,
         color=color,
         label=key_target + " transmission",
     )
-    plt.xlim([max(0, t_lo), t_hi - t_offset])
+    plt.xlim([max(t_offset, max(0, t_lo)), t_hi - t_offset])
+    plt.ylim(0, 2)
     plt.xlabel(r"TIME [$\mu$s]", labelpad=10)
     plt.ylabel(r"TRANSMISSION", labelpad=10)
     plt.legend()
@@ -352,7 +378,6 @@ def plot_trans(
 def load_pickle(fname=None):
     """Save dictionary of CoMPASS runs as pickle."""
     print(f"The current directory is: {Path.getcwd()}")
-    
     print('Available pickle files are:',
           )
     if fname is None:

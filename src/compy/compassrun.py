@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import click
 import xmltodict
 
-from compy.utilities import calc_TOF
+from compy.utilities import calc_TOF, calc_trans
 
 # set plotting environment
 plt.close("all")
@@ -740,6 +740,49 @@ class CompassRun:
             bins=n_bins,
         )
         return hist, bin_edges
+
+    def add_trans(self, runs, key_open,
+                  t_lo=0.0, t_hi=200.0, n_bins=600, t_offset=5.56):
+        """Add neutron transmission values and errors."""
+        target_in = self.data["filtered"]["CH0"]["TOF"]
+        target_out = runs[key_open].data["filtered"]["CH0"]["TOF"]
+        t_meas_in = self.t_meas
+        t_meas_out = runs[key_open].t_meas
+        counts_in, __ = np.histogram(target_in, bins=n_bins, range=[t_lo, t_hi])
+        counts_out, __ = np.histogram(target_out, bins=n_bins, range=[t_lo, t_hi])
+        bins = np.linspace(t_lo, t_hi, n_bins + 1)[:-1] + (
+            (t_hi - t_lo) / n_bins / 2 - t_offset
+        )
+        trans, errs_trans = calc_trans(
+            counts_in, counts_out, t_meas_in, t_meas_out
+        )
+        self.bins_trans = bins
+        self.trans = trans
+        self.errs_trans = errs_trans
+
+    def plot_trans(self, t_offset=0.0, color="black", add_plot=False):
+        """Plot transmission."""
+        if not add_plot:
+            plt.figure(figsize=(16, 9))
+        plt.errorbar(
+            x=self.bins_trans,
+            y=self.trans,
+            yerr=self.errs_trans,
+            lw=2,
+            drawstyle='steps-mid',
+            elinewidth=0.5,
+            capsize=1,
+            color=color,
+            label=self.key + " transmission",
+        )
+        plt.xlim([max(t_offset, max(0, self.bins_trans[0])),
+                  self.bins_trans[-1] - t_offset])
+        plt.ylim(0, 2)
+        plt.xlabel(r"TIME [$\mu$s]", labelpad=10)
+        plt.ylabel(r"TRANSMISSION", labelpad=10)
+        plt.legend()
+        plt.tight_layout()
+        return plt.gcf(), plt.gca()
 
 
 def initialize(folders=None, keys=None):

@@ -31,13 +31,13 @@ def main():
         key_tuples, VERBOSE = compassrun.initialize(folders=folders)
         runs = compassrun.process_runs(key_tuples)
         merge_flag = click.confirm('\nWould you like to merge runs?',
-                                   default=False)
+                                   default=True)
         if merge_flag:
             utilities.merge_related_runs(runs, quiet=True)
 
     # plot filtered TOF spectra for all keys
     print_flag = click.confirm('\nWould you like to plot the spectra?',
-                               default=True)
+                               default=False)
     if print_flag:
         plt.figure(figsize=(16, 9))
         for key in runs.keys():
@@ -67,7 +67,7 @@ def main():
 
     # save data to pickle
     save_flag = click.confirm('\nWould you like to save the runs as a pickle?',
-                              default=True)
+                              default=False)
     if save_flag:
         utilities.save_pickle(runs)
     print('\nThank you for using compy, the CoMPASS Python Companion!')
