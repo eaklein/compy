@@ -48,6 +48,12 @@ class CompassRun:
         acquisition time in minutes
     file_fmt : string
         file format of saved CoMPASS data (e.g., csv, bin)
+    bins_trans : array
+        bins for neutron transmission histogram
+    trans : array
+        values for neutron transmission histogram
+    errs_trans : array
+        uncertainties for neutron transmission histogram
 
     Methods
     -------
@@ -61,6 +67,8 @@ class CompassRun:
         Read raw data from CoMPASS-generated files.
     add_tof(filtered=['unfiltered', 'filtered']):
         Add TOF column to raw data dataframe.
+    add_trans(runs, key_open, t_lo=0.0, t_hi=200.0, n_bins=600, t_offset=5.56):
+        Add neutron transmission values referenced to specified open beam.
     user_filter(e_lo=95, e_hi=135, prompt=False):
         Perform user cut of energy spectrum.
     plot_tof(t_lo=0, t_hi=200, n_bins=400,
@@ -71,6 +79,8 @@ class CompassRun:
     make_hist(filtered='unfiltered', mode='TOF', ch='CH0',
               val_lo=0, val_hi=200, n_bins=400):
         Create a histogram from TOF values.
+    plot_trans(t_offset=0.0, color="black", add_plot=False):
+        Plot neutron transmission spectrum.
     """
 
     def __init__(
@@ -444,8 +454,8 @@ class CompassRun:
                 ):
                     print(f"Reading {filt_key} CH1 data for key: {self.key}.")
                     print(self.params[filt_key]["file_CH1"][0])
-                    # fname = (Path(self.folder) / self.key / filt_key.upper() /
-                    #          self.params[filt_key]['file_CH1'][0])
+                    # fname = (Path(self.folder) / self.key / filt_key.upper()
+                    #          / self.params[filt_key]['file_CH1'][0])
                     fname = self.params[filt_key]["file_CH1"][0]
                     file_fmt = "." + self.file_fmt.lower()
                     try:
@@ -591,8 +601,6 @@ class CompassRun:
             e_hi = click.prompt(
                 "Set e_hi channel for pulse area cut", default=e_hi
             )
-        # copy all of CH1 pulse data
-        self.data["user"]["CH1"] = self.data["unfiltered"]["CH1"].copy()
         # perform energy cut on unfiltered detector signal data
         self.data["user"]["CH0"] = (
             self.data["unfiltered"]["CH0"]
@@ -604,17 +612,28 @@ class CompassRun:
         )
         # if TOF not already calculated, calculate TOF
         if "TOF" not in self.data["user"]["CH0"]:
+            # copy all of CH1 pulse data
+            self.data["user"]["CH1"] = self.data["unfiltered"]["CH1"].copy()
             self.data["user"]["CH0"]["TOF"] = calc_TOF(
-                self.data["unfiltered"]["CH1"]["TIMETAG"],
+                self.data["user"]["CH1"]["TIMETAG"],
                 self.data["user"]["CH0"]["TIMETAG"],
             )
         print(
             "Successfully performed user energy cut of TOF spectrum "
-            f"for {self.key}.\n"
+            f"for {self.key}."
         )
 
-    def plot_tof(self, filtered="unfiltered", t_lo=0.0, t_hi=200.0, n_bins=400,
-                 color="blue", label=None, norm=True, add=False):
+    def plot_tof(
+        self,
+        filtered="unfiltered",
+        t_lo=0.0,
+        t_hi=200.0,
+        n_bins=400,
+        color="blue",
+        label=None,
+        norm=True,
+        add=False,
+    ):
         """Plot manually calculated TOF spectrum.
 
         Parameters
@@ -708,8 +727,15 @@ class CompassRun:
         plt.legend(loc="upper right")
         plt.tight_layout()
 
-    def make_hist(self, mode="TOF", filtered="unfiltered", ch="CH0",
-                  val_lo=0.0, val_hi=200.0, n_bins=400):
+    def make_hist(
+        self,
+        mode="TOF",
+        filtered="unfiltered",
+        ch="CH0",
+        val_lo=0.0,
+        val_hi=200.0,
+        n_bins=400,
+    ):
         """Create a histogram from TOF values.
 
         Parameters
@@ -741,15 +767,27 @@ class CompassRun:
         )
         return hist, bin_edges
 
-    def add_trans(self, runs, key_open,
-                  t_lo=0.0, t_hi=200.0, n_bins=600, t_offset=5.56):
+    def add_trans(
+        self,
+        runs,
+        key_open,
+        filtered="filtered",
+        t_lo=0.0,
+        t_hi=200.0,
+        n_bins=600,
+        t_offset=5.56,
+    ):
         """Add neutron transmission values and errors."""
-        target_in = self.data["filtered"]["CH0"]["TOF"]
-        target_out = runs[key_open].data["filtered"]["CH0"]["TOF"]
+        target_in = self.data[filtered]["CH0"]["TOF"]
+        target_out = runs[key_open].data[filtered]["CH0"]["TOF"]
         t_meas_in = self.t_meas
         t_meas_out = runs[key_open].t_meas
-        counts_in, __ = np.histogram(target_in, bins=n_bins, range=[t_lo, t_hi])
-        counts_out, __ = np.histogram(target_out, bins=n_bins, range=[t_lo, t_hi])
+        counts_in, __ = np.histogram(
+            target_in, bins=n_bins, range=[t_lo, t_hi]
+        )
+        counts_out, __ = np.histogram(
+            target_out, bins=n_bins, range=[t_lo, t_hi]
+        )
         bins = np.linspace(t_lo, t_hi, n_bins + 1)[:-1] + (
             (t_hi - t_lo) / n_bins / 2 - t_offset
         )
@@ -769,14 +807,18 @@ class CompassRun:
             y=self.trans,
             yerr=self.errs_trans,
             lw=2,
-            drawstyle='steps-mid',
+            drawstyle="steps-mid",
             elinewidth=0.5,
             capsize=1,
             color=color,
-            label=self.key + " transmission",
+            label=self.key,
         )
-        plt.xlim([max(t_offset, max(0, self.bins_trans[0])),
-                  self.bins_trans[-1] - t_offset])
+        plt.xlim(
+            [
+                max(t_offset, max(0, self.bins_trans[0])),
+                self.bins_trans[-1] - t_offset,
+            ]
+        )
         plt.ylim(0, 2)
         plt.xlabel(r"TIME [$\mu$s]", labelpad=10)
         plt.ylabel(r"TRANSMISSION", labelpad=10)
@@ -897,70 +939,69 @@ def select_keys(folders):
         bool_date = click.confirm(
             "\nWould you like to process by date?", default=False
         )
-        if not bool_date:
-            while True:
-                n_keys = len(keys_select)
-                key_input = input(
-                    "\nType 'options' to see all available options."
-                    "\nPress 'enter' to end key selection."
-                    "\nEnter key name: "
+        while bool_date:
+            n_keys = len(keys_select)
+            date = input(
+                "(Note: \nPress 'enter' to end key selection.)"
+                "\nEnter run date: "
+            )
+            # click 'enter' to end key selection
+            if (not date) and (n_keys != 0):
+                print("Would you like to process more keys?")
+                break
+            if n_keys != 0 and not any(
+                key.startswith(date) for key in keys_folder
+            ):
+                print("Bad key provided.")
+            # if 'enter', but no keys selected
+            elif (
+                not any(key.startswith(date) for key in keys_folder)
+            ) and n_keys == 0:
+                print(
+                    "Bad key provided. "
+                    "You must enter at least one key name!"
                 )
-                # click 'enter' to end key selection for folder
-                if not key_input:
-                    break
-                # if 'enter', but on last folder and no keys selected
-                if (not key_input) and (i == n_folders - 1) and (n_keys == 0):
-                    print("You must enter at least one key name!")
-                # print all key options
-                elif key_input == "options":
-                    print(keys_folder)
-                # if key selected
-                else:
-                    # enable multiple entries with comma separation
-                    key_input = [x.strip() for x in key_input.split(",")]
-                    for key in key_input:
-                        # if user entry not available key, print warning
-                        while key not in keys_folder:
-                            key_new = input(
-                                f"\nThat key {key} does not exist."
-                                "\nType 'options' to see available options."
-                                "\nPress <ENTER> to end key selection."
-                                "\nEnter key name: "
-                            )
-                            if key_new == "options":
-                                print(keys_folder)
-                            key = key_new
-                        # if good key, append to list
+            # if good key, append to list
+            elif any(key.startswith(date) for key in keys_folder):
+                for key in keys_folder:
+                    if (key.startswith(date)) and (
+                        (key, folder) not in keys_select
+                    ):
                         keys_select.append((key, folder))
-        else:
-            while bool_date:
-                n_keys = len(keys_select)
-                date = input(
-                    "(Note: \nPress 'enter' to end key selection.)"
-                    "\nEnter run date: "
-                )
-                # click 'enter' to end key selection
-                if (not date) and (n_keys != 0):
-                    break
-                if n_keys != 0 and not any(
-                    key.startswith(date) for key in keys_folder
-                ):
-                    print("Bad key provided.")
-                # if 'enter', but no keys selected
-                elif (
-                    not any(key.startswith(date) for key in keys_folder)
-                ) and n_keys == 0:
-                    print(
-                        "Bad key provided. "
-                        "You must enter at least one key name!"
-                    )
-                # if good key, append to list
-                elif any(key.startswith(date) for key in keys_folder):
-                    for key in keys_folder:
-                        if (key.startswith(date)) and (
-                            (key, folder) not in keys_select
-                        ):
-                            keys_select.append((key, folder))
+        while True:
+            n_keys = len(keys_select)
+            key_input = input(
+                "\nType 'options' to see all available options."
+                "\nPress 'enter' to end key selection."
+                "\nEnter key name: "
+            )
+            # click 'enter' to end key selection for folder
+            if not key_input:
+                break
+            # if 'enter', but on last folder and no keys selected
+            if (not key_input) and (i == n_folders - 1) and (n_keys == 0):
+                print("You must enter at least one key name!")
+            # print all key options
+            elif key_input == "options":
+                print(keys_folder)
+            # if key selected
+            else:
+                # enable multiple entries with comma separation
+                key_input = [x.strip() for x in key_input.split(",")]
+                for key in key_input:
+                    # if user entry not available key, print warning
+                    while key not in keys_folder:
+                        key_new = input(
+                            f"\nThat key {key} does not exist."
+                            "\nType 'options' to see available options."
+                            "\nPress <ENTER> to end key selection."
+                            "\nEnter key name: "
+                        )
+                        if key_new == "options":
+                            print(keys_folder)
+                        key = key_new
+                    # if good key, append to list
+                    keys_select.append((key, folder))
     return keys_select
 
 

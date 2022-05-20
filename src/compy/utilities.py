@@ -339,12 +339,12 @@ def plot_trans(
     if plot_kde:
         kde_in = gaussian_kde(target_in, bw_method=kde_bw)
         kde_out = gaussian_kde(target_out, bw_method=kde_bw)
-        t_lin = np.linspace(t_lo, t_hi, int((t_hi-t_lo)/0.1) + 1)
+        t_lin = np.linspace(t_lo, t_hi, int((t_hi - t_lo) / 0.1) + 1)
         trans_kde, __ = calc_trans(
-            kde_in.evaluate(t_lin)*len(target_in),
-            kde_out.evaluate(t_lin)*len(target_out),
+            kde_in.evaluate(t_lin) * len(target_in),
+            kde_out.evaluate(t_lin) * len(target_out),
             t_meas_in,
-            t_meas_out
+            t_meas_out,
         )
         plt.plot(
             t_lin - t_offset,
@@ -352,7 +352,7 @@ def plot_trans(
             lw=2,
             color=color_kde,
             label=key_target + " transmission (KDE)",
-            zorder=10
+            zorder=10,
         )
         lw = 1
     plt.errorbar(
@@ -360,7 +360,7 @@ def plot_trans(
         y=vals_trans,
         yerr=vals_errs,
         lw=lw,
-        drawstyle='steps-mid',
+        drawstyle="steps-mid",
         elinewidth=0.5,
         capsize=1,
         color=color,
@@ -378,8 +378,9 @@ def plot_trans(
 def load_pickle(fname=None):
     """Save dictionary of CoMPASS runs as pickle."""
     print(f"The current directory is: {Path.getcwd()}")
-    print('Available pickle files are:',
-          )
+    print(
+        "Available pickle files are:",
+    )
     if fname is None:
         fname = input("\nWhat is the name of the pickle file to load?:\n")
     if not fname.endswith(".pkl"):
