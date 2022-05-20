@@ -12,6 +12,7 @@ import click
 
 from compy import compassrun, utilities
 
+
 def main():
     """Process user-selected runs and plot filtered TOF spectra."""
     args = sys.argv[1:]
@@ -58,7 +59,7 @@ def main():
             plt.xlim(25, 185)
             plt.xlabel(r'TIME [$\mu$s]')
             plt.ylabel('COUNTS/MINUTE')
-            plt.ylim(0, 3.5)
+            # plt.ylim(0, 3.5)
             plt.legend()
             plt.tight_layout()
             plt.show()
@@ -71,7 +72,27 @@ def main():
     if save_flag:
         utilities.save_pickle(runs)
     print('\nThank you for using compy, the CoMPASS Python Companion!')
+
+    trans_flag = click.confirm('\nWould you like to calculate transmission?',
+                               default=False)
+    if trans_flag:
+        keys = list(runs.keys())
+        print('\nProcessed keys are', f'{keys}')
+        key_ob = input('Which key would you like to use for open beam?\n')
+
+        # add transmission
+        [runs[key].add_trans(runs, key_ob, t_offset=0)
+         for key in keys if key != key_ob]
+
+        # plot transmission for target runs
+        trans_plot_flag = click.confirm('\nWould you like to plot transmission?',
+                                        default=False)
+        if trans_plot_flag:
+            [runs[key].plot_trans(runs, key, key_ob, n_bins=600, t_offset=5.56)
+             for key in keys if key != key_ob]
+
     return runs
+
 
 if __name__ == '__main__':
     os.chdir('/mnt/c/Users/Avram/Dropbox (MIT)/MIT/research/NRTA/experiments/')
