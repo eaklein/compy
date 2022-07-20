@@ -7,7 +7,7 @@ Created on Thu Feb 24 15:21:38 2022
 from bisect import bisect_left
 from copy import deepcopy
 from pathlib import Path
-
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -183,6 +183,7 @@ def merge_related_runs(runs, quiet=False):
 def calc_TOF(t_pulse, t_signal):
     """Calculate TOF from pulse and signal time arrays."""
     tof = []
+    idx = 1
     for t in t_signal:
         idx = bisect_left(t_pulse, t)
         if idx == len(t_pulse):
@@ -377,7 +378,7 @@ def plot_trans(
 
 def load_pickle(fname=None):
     """Save dictionary of CoMPASS runs as pickle."""
-    print(f"The current directory is: {Path.getcwd()}")
+    print(f"The current directory is: {os.path.dirname(__file__)}")
     print(
         "Available pickle files are:",
     )

@@ -66,6 +66,8 @@ def main():
                     drawstyle="steps-mid",
                     label=key.replace("_", "-"),
                 )
+            else:
+                print(f'Did not find TOF data for key: {key}.')
         if len(runs.keys()) > 0:
             plt.xlim(25, 185)
             plt.xlabel(r"TIME [$\mu$s]")

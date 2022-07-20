@@ -13,6 +13,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import click
 import xmltodict
+from scipy.stats import gaussian_kde
 
 from compy.utilities import calc_TOF, calc_trans
 
@@ -25,6 +26,14 @@ plt.rcParams["text.usetex"] = True
 plt.rcParams["xtick.direction"] = "in"
 plt.rcParams["ytick.direction"] = "in"
 
+
+def f_exponential(t, b, tau):
+    """Return exponential function."""
+    return b * np.exp(- t / tau)
+
+
+# parameters for exponential background fit (counts/minute for 500ns bins)
+popt = [ 12.77513472, 185.06506026]
 
 class CompassRun:
     """
@@ -67,7 +76,8 @@ class CompassRun:
         Read raw data from CoMPASS-generated files.
     add_tof(filtered=['unfiltered', 'filtered']):
         Add TOF column to raw data dataframe.
-    add_trans(runs, key_open, t_lo=0.0, t_hi=200.0, n_bins=600, t_offset=5.56):
+    add_trans(runs, key_open, t_lo=0.0, t_hi=200.0, n_bins=600, kde_bw=0.005,
+              t_offset=5.56):
         Add neutron transmission values referenced to specified open beam.
     user_filter(e_lo=95, e_hi=135, prompt=False):
         Perform user cut of energy spectrum.
@@ -91,7 +101,9 @@ class CompassRun:
         spectra=None,
         data=None,
         t_meas=0.0,
-        file_fmt=".csv",
+        ch_signal=4,
+        ch_pulse=5,
+        file_fmt="csv",
         folder="C:/Users/Avram/Dropbox (MIT)/Resonances/data/CoMPASS/",
     ):
         """Construct all the necessary attributes for the compassRun class.
@@ -112,6 +124,10 @@ class CompassRun:
                 un-/filtered data acquired and stored by CoMPASS
             t_meas : float
                 acquisition time in minutes
+            ch_signal : int
+                data acquisition channel of detector
+            ch_pulse: int
+                data acquisition channel of D-T pulser
             file_fmt : string
                 file format of saved CoMPASS data (e.g., csv, bin)
         """
@@ -123,6 +139,8 @@ class CompassRun:
         self.data = data
         self.t_meas = t_meas
         self.file_fmt = file_fmt
+        self.ch_signal = f"CH{ch_signal}"
+        self.ch_pulse = f"CH{ch_pulse}"
 
     def read_settings(self):
         """Read CoMPASS project folder and extract settings for each run."""
@@ -132,6 +150,7 @@ class CompassRun:
             self.params = {}
         for filt_key in ["unfiltered", "filtered"]:
             self.params[filt_key] = {}
+        
         try:
             xml_fname = Path(self.folder) / self.key / "settings.xml"
             with open(xml_fname) as f:
@@ -183,7 +202,7 @@ class CompassRun:
         )
         # read files from run directory
         print("Reading files from directory.")
-        file_fmt = "." + self.file_fmt.lower()
+        file_fmt = self.file_fmt
         for filt_key in ["unfiltered", "filtered"]:
             filt_upper = filt_key.upper()
             self.params[filt_key] = {}
@@ -195,41 +214,41 @@ class CompassRun:
                     f"WARNING: Cannot find {filt_upper} folder for {self.key}."
                 )
                 break
-            # read raw CH0 data location
+            # read raw signal channel data location
             # [print(str(file)) for file in
             #  Path(folder_filt).glob('*' + file_fmt)]
-            self.params[filt_key]["file_CH0"] = [
+            self.params[filt_key][f"file_{self.ch_signal}"] = [
                 str(file)
-                for file in Path(folder_filt).glob("*" + file_fmt)
-                if "CH0" in str(file)
+                for file in Path(folder_filt).glob(f"*{file_fmt}")
+                if self.ch_signal in str(file)
             ]
-            # read raw CH1 data location
-            self.params[filt_key]["file_CH1"] = [
+            # read raw pulse data location
+            self.params[filt_key][f"file_{self.ch_pulse}"] = [
                 str(file)
-                for file in Path(folder_filt).glob("*" + file_fmt)
-                if "CH1" in str(file)
+                for file in Path(folder_filt).glob(f"*{file_fmt}")
+                if self.ch_pulse in str(file)
             ]
             # read saved TOF spectra location
             self.params[filt_key]["file_data_TOF"] = [
                 str(file)
-                for file in Path(folder_filt).glob("*" + file_fmt)
+                for file in Path(folder_filt).glob(f"*{file_fmt}")
                 if "TOF" in str(file)
             ]
             # read saved E spectra location
             self.params[filt_key]["file_data_E"] = [
                 str(file)
-                for file in Path(folder_filt).glob("*" + file_fmt)
-                if ("CH0" in str(file)) and ("E" in str(file))
+                for file in Path(folder_filt).glob(f"*{file_fmt}")
+                if (self.ch_signal in str(file)) and ("E" in str(file))
             ]
             # read saved PSD spectra location
             self.params[filt_key]["file_data_PSD"] = [
                 str(file)
-                for file in Path(folder_filt).glob("*" + file_fmt)
-                if ("CH0" in str(file)) and ("PSD" in str(file))
+                for file in Path(folder_filt).glob(f"*{file_fmt}")
+                if (self.ch_signal in str(file)) and ("PSD" in str(file))
             ]
 
     def read_spectra(
-        self, filtered=["unfiltered", "filtered"], modes=["E", "TOF", "PSD"]
+        self, filtered=None, modes=None
     ):
         """Read data from CoMPASS saved histograms.
 
@@ -242,10 +261,14 @@ class CompassRun:
         """
         if self.spectra is None:
             self.spectra = {}
+        if filtered is None:
+            filtered = ["unfiltered", "filtered"]
+        if modes is None:
+            modes = ["E", "TOF", "PSD"]
         for filt_key in filtered:
             self.spectra[filt_key] = {}
             for mode in modes:
-                key_data = "file_data_" + mode
+                key_data = f"file_data_{mode}"
                 if key_data in self.params[filt_key]:
                     self.spectra[filt_key][mode] = {}
                     try:
@@ -276,7 +299,7 @@ class CompassRun:
                     )
 
     def add_spectra(
-        self, filtered=["unfiltered", "filtered"], modes=["TOF", "E"]
+        self, filtered=None, modes=None
     ):
         """Add spectrum using stored data.
 
@@ -287,8 +310,12 @@ class CompassRun:
             modes : list[str]
                 which modes for which to make spectra
         """
+        if filtered is None:
+            filtered = ["unfiltered", "filtered"]
+        if modes is None:
+            modes = ["TOF", "E"]
         for filt_key in filtered:
-            data = self.data[filt_key]["CH0"].copy()
+            data = self.data[filt_key][self.ch_signal].copy()
             x = pd.DataFrame()
             for mode in modes:
                 print(f"Adding {filt_key} {mode} spectrum...", end="")
@@ -331,7 +358,7 @@ class CompassRun:
                     self.spectra[filt_key][mode]["bins"] = bins
                     print("Done!")
 
-    def read_data(self, filtered=["unfiltered", "filtered"]):
+    def read_data(self, filtered=None):
         """Read raw data from CoMPASS-generated files.
 
         Parameters
@@ -341,13 +368,15 @@ class CompassRun:
         """
         if self.data is None:
             self.data = {}
-        file_fmt = "." + self.file_fmt.lower()
+        if filtered is None:
+            filtered = ["unfiltered", "filtered"]
+        file_fmt = self.file_fmt.lower()
         for filt_key in filtered:
             self.data[filt_key] = {}
             # attempt to read Ch.0 (detector) data if it exists
-            if "file_CH0" in self.params[filt_key]:
+            if (f"file_{self.ch_signal}") in self.params[filt_key]:
                 verbose(
-                    f"Reading {filt_key} CH0 data for key: {self.key}...",
+                    f"Reading {filt_key} {self.ch_signal} data for key: {self.key}...",
                     end="",
                 )
                 try:
@@ -355,76 +384,76 @@ class CompassRun:
                         Path(self.folder)
                         / self.key
                         / filt_key.upper()
-                        / self.params[filt_key]["file_CH0"][0]
+                        / self.params[filt_key][f"file_{self.ch_signal}"][0]
                     )
-                    if file_fmt == ".csv":
-                        self.data[filt_key]["CH0"] = pd.read_csv(
+                    if file_fmt == "csv":
+                        self.data[filt_key][self.ch_signal] = pd.read_csv(
                             fname, sep=";", on_bad_lines="skip"
                         )
-                    elif file_fmt == ".bin":
+                    elif file_fmt == "bin":
                         with open(fname, "rb") as f:
                             byte = f.read()
                         data = struct.unpack(
                             ("<" + "HHQHHII" * (len(byte) // 24)), byte
                         )
-                        self.data[filt_key]["CH0"] = pd.DataFrame(
+                        self.data[filt_key][self.ch_signal] = pd.DataFrame(
                             np.reshape(np.array(data), [-1, 7])[:, 2:5],
                             columns=["TIMETAG", "ENERGY", "ENERGYSHORT"],
                         )
-                    if self.data[filt_key]["CH0"].empty:
+                    if self.data[filt_key][self.ch_signal].empty:
                         print("file was empty.")
                     else:
                         print("Done!")
                 except IndexError:
                     print(
-                        f"ERROR: unable to read in {filt_key} CH0 data "
+                        f"ERROR: unable to read in {filt_key} {self.ch_signal} data "
                         f"for {self.key}."
                     )
                     continue
                 # attempt to read Ch.1 (pulse) data if TOF not yet calculated
-                if "TOF" in self.data[filt_key]["CH0"]:
+                if "TOF" in self.data[filt_key][self.ch_signal]:
                     continue
-                if len(self.params[filt_key]["file_CH1"]) > 0:
+                if len(self.params[filt_key]["file_" + self.ch_pulse]) > 0:
                     verbose(
-                        f"Reading {filt_key} CH1 data for key: {self.key}...",
+                        f"Reading {filt_key} {self.ch_pulse} data for key: {self.key}...",
                         end="",
                     )
                     fname = (
                         Path(self.folder)
                         / self.key
                         / filt_key.upper()
-                        / self.params[filt_key]["file_CH1"][0]
+                        / self.params[filt_key][f"file_{self.ch_pulse}"][0]
                     )
-                    if file_fmt == ".csv":
-                        self.data[filt_key]["CH1"] = pd.read_csv(
+                    if file_fmt == "csv":
+                        self.data[filt_key][self.ch_pulse] = pd.read_csv(
                             fname, sep=";", on_bad_lines="skip"
                         )
-                    elif file_fmt == ".bin":
+                    elif file_fmt == "bin":
                         with open(fname, "rb") as f:
                             byte = f.read()
                         data = struct.unpack(
                             ("<" + "HHQHHII" * (len(byte) // 24)), byte
                         )
-                        self.data[filt_key]["CH1"] = pd.DataFrame(
+                        self.data[filt_key][self.ch_pulse] = pd.DataFrame(
                             np.reshape(np.array(data), [-1, 7])[:, 2:5],
                             columns=["TIMETAG", "ENERGY", "ENERGYSHORT"],
                         )
-                    if self.data[filt_key]["CH1"].empty:
+                    if self.data[filt_key][self.ch_pulse].empty:
                         print("no data found.")
                     else:
                         print("Done!")
                 else:
                     print(
-                        f"Did not find {filt_key} CH1 data for key: "
+                        f"Did not find {filt_key} {self.ch_pulse} data for key: "
                         f"{self.key}."
                     )
             else:
                 print(
-                    f"Did not find {filt_key} CH0 data for key: "
+                    f"Did not find {filt_key} {self.ch_signal} data for key: "
                     f"{self.key}."
                 )
 
-    def add_tof(self, filtered=["unfiltered", "filtered"]):
+    def add_tof(self, filtered=None):
         """Add TOF column to raw data dataframe.
 
         Parameters
@@ -432,89 +461,91 @@ class CompassRun:
             filtered : list[str]
                 specifies un-/filtered folders from which to read data
         """
+        if filtered is None:
+            filtered = ["unfiltered", "filtered"]
         for filt_key in filtered:
-            # check if un-/filtered CH0 data present and TOF not yet calculated
+            # check if un-/filtered signal data present and TOF not yet calculated
             if (
                 (filt_key in self.data)
-                and ("CH0" in self.data[filt_key])
-                and ("TOF" in self.data[filt_key]["CH0"])
+                and (self.ch_signal in self.data[filt_key])
+                and ("TOF" in self.data[filt_key][self.ch_signal])
             ):
                 print("TOF already calculated!")
             elif filt_key not in self.data:
                 print(f"Could not calculate TOF. No {filt_key} data found!")
-            elif "CH0" not in self.data[filt_key]:
+            elif self.ch_signal not in self.data[filt_key]:
                 print(
-                    f"Could not calculate TOF. No {filt_key} Ch0 data found!"
+                    f"Could not calculate TOF. No {filt_key} {self.ch_signal} data found!"
                 )
             else:
                 # attempt to read in Channel 1 (pulse) data if not yet done
-                if (len(self.params[filt_key]["file_CH1"]) > 0) and not (
-                    ("CH1" not in self.data[filt_key])
-                    or self.data[filt_key]["CH1"].empty
+                if (len(self.params[filt_key][f"file_{self.ch_pulse}"]) > 0) and not (
+                    (self.ch_pulse not in self.data[filt_key])
+                    or self.data[filt_key][self.ch_pulse].empty
                 ):
-                    print(f"Reading {filt_key} CH1 data for key: {self.key}.")
-                    print(self.params[filt_key]["file_CH1"][0])
+                    print(f"Reading {filt_key} {self.ch_pulse} data for key: {self.key}.")
+                    print(self.params[filt_key][f"file_{self.ch_pulse}"][0])
                     # fname = (Path(self.folder) / self.key / filt_key.upper()
-                    #          / self.params[filt_key]['file_CH1'][0])
-                    fname = self.params[filt_key]["file_CH1"][0]
-                    file_fmt = "." + self.file_fmt.lower()
+                    #          / self.params[filt_key]['file_' + self.ch_pulse][0])
+                    fname = self.params[filt_key][f"file_{self.ch_pulse}"][0]
+                    file_fmt = self.file_fmt.lower()
                     try:
-                        if file_fmt == ".csv":
-                            self.data[filt_key]["CH1"] = pd.read_csv(
+                        if file_fmt == "csv":
+                            self.data[filt_key][self.ch_pulse] = pd.read_csv(
                                 fname, sep=";", on_bad_lines="skip"
                             )
-                        elif file_fmt == ".bin":
+                        elif file_fmt == "bin":
                             with open(fname, "rb") as f:
                                 byte = f.read()
                             data = struct.unpack(
                                 ("<" + "HHQHHII" * (len(byte) // 24)), byte
                             )
-                            self.data[filt_key]["CH1"] = pd.DataFrame(
+                            self.data[filt_key][self.ch_pulse] = pd.DataFrame(
                                 np.reshape(np.array(data), [-1, 7])[:, 2:5],
                                 columns=["TIMETAG", "ENERGY", "ENERGYSHORT"],
                             )
                     except:
                         print(
-                            f"ERROR: unable to read in {filt_key} CH1 data "
+                            f"ERROR: unable to read in {filt_key} {self.ch_pulse} data "
                             f"for {self.key}."
                         )
                         break
                 else:
                     print(
-                        f"WARNING: TOF not calculated--{filt_key} CH1 data"
+                        f"WARNING: TOF not calculated--{filt_key} {self.ch_pulse} data"
                         f"non-existent or empty for {self.key}."
                     )
                     break
-                # check that neither CH0/CH1 are empty and timing info saved
+                # check that neither channel is empty and timing info saved
                 if (
                     all(
                         (not self.data[filt_key][ch].empty)
                         and ("TIMETAG" in self.data[filt_key][ch])
                     )
-                    for ch in ["CH0", "CH1"]
+                    for ch in [self.ch_signal, self.ch_pulse]
                 ):
                     print(
                         f"Calculating {filt_key} TOF for {self.key}...", end=""
                     )
                     # try:
                     # calculate TOF using TIMETAG info
-                    self.data[filt_key]["CH0"]["TOF"] = calc_TOF(
-                        self.data[filt_key]["CH1"]["TIMETAG"],
-                        self.data[filt_key]["CH0"]["TIMETAG"],
+                    self.data[filt_key][self.ch_signal]["TOF"] = calc_TOF(
+                        self.data[filt_key][self.ch_pulse]["TIMETAG"],
+                        self.data[filt_key][self.ch_signal]["TIMETAG"],
                     )
                     print("Done!")
                     # except :
                     #     print('\nERROR: issue arose calculating TOF.')
                     #     break
                     try:
-                        # rewrite CH0 csv file with TOF added
+                        # rewrite signal channel csv file with TOF added
                         fname = (
                             Path(self.folder)
                             / self.key
                             / filt_key.upper()
-                            / self.params[filt_key]["file_CH0"][0]
+                            / self.params[filt_key][f"file_{self.ch_signal}"][0]
                         )
-                        self.data[filt_key]["CH0"].to_csv(
+                        self.data[filt_key][self.ch_signal].to_csv(
                             fname, sep=";", index=False
                         )
                     except:
@@ -523,7 +554,7 @@ class CompassRun:
                 else:
                     print("ERROR: data empty or timetag not found.")
 
-    def add_psd(self, filtered=["unfiltered", "filtered"], file_write=True):
+    def add_psd(self, filtered=None, file_write=True):
         """Add PSD column to raw data dataframe.
 
         Parameters
@@ -533,31 +564,33 @@ class CompassRun:
             file_write : bool
                 specifies whether to write new dataframe with PSD to file
         """
+        if filtered is None:
+            filtered = ["unfiltered", "filtered"]
         for filt_key in filtered:
-            # check if un-/filtered CH0 data present and TOF not yet calculated
-            if "CH0" not in self.data[filt_key]:
+            # check if un-/filtered signal data present and TOF not yet calculated
+            if self.ch_signal not in self.data[filt_key]:
                 print("Could not calculate PSD. Ch.0 data not found!")
-            elif ("CH0" in self.data[filt_key]) and (
-                "PSD" in self.data[filt_key]["CH0"]
+            elif (self.ch_signal in self.data[filt_key]) and (
+                "PSD" in self.data[filt_key][self.ch_signal]
             ):
                 print("PSD already calculated!")
             else:
-                # check that CH0 is not empty
-                if not self.data[filt_key]["CH0"].empty:
+                # check that signal channel is not empty
+                if not self.data[filt_key][self.ch_signal].empty:
                     print(f"Calculating {filt_key} PSD for {self.key}")
                     try:
                         # calculate PSD
-                        data = self.data[filt_key]["CH0"]
-                        self.data[filt_key]["CH0"]["PSD"] = (
+                        data = self.data[filt_key][self.ch_signal]
+                        self.data[filt_key][self.ch_signal]["PSD"] = (
                             1 - data["ENERGYSHORT"] / data["ENERGY"]
                         )
                     except:
                         print("ERROR: issue arose calculating PSD.")
                         break
-                    if "TOF" not in self.data[filt_key]["CH0"]:
+                    if "TOF" not in self.data[filt_key][self.ch_signal]:
                         file_write = click.confirm(
                             "\nNo TOF data was found in dataframe. Are you sure"
-                            " you want to overwrite data file to incldue PSD?",
+                            " you want to overwrite data file to include PSD?",
                             default=False,
                         )
                     if file_write:
@@ -565,11 +598,11 @@ class CompassRun:
                             Path(self.folder)
                             / self.key
                             / filt_key.upper()
-                            / self.params[filt_key]["file_CH0"][0]
+                            / self.params[filt_key][f"file_{self.ch_signal}"][0]
                         )
                         try:
-                            # rewrite CH0 csv file with PSD added
-                            self.data[filt_key]["CH0"].to_csv(
+                            # rewrite signal channel csv file with PSD added
+                            self.data[filt_key][self.ch_signal].to_csv(
                                 fname, sep=";", index=False
                             )
                         except:
@@ -602,21 +635,21 @@ class CompassRun:
                 "Set e_hi channel for pulse area cut", default=e_hi
             )
         # perform energy cut on unfiltered detector signal data
-        self.data["user"]["CH0"] = (
-            self.data["unfiltered"]["CH0"]
+        self.data["user"][self.ch_signal] = (
+            self.data["unfiltered"][self.ch_signal]
             .loc[
-                (self.data["unfiltered"]["CH0"]["ENERGY"] > e_lo)
-                & (self.data["unfiltered"]["CH0"]["ENERGY"] < e_hi)
+                (self.data["unfiltered"][self.ch_signal]["ENERGY"] > e_lo)
+                & (self.data["unfiltered"][self.ch_signal]["ENERGY"] < e_hi)
             ]
             .copy()
         )
         # if TOF not already calculated, calculate TOF
-        if "TOF" not in self.data["user"]["CH0"]:
-            # copy all of CH1 pulse data
-            self.data["user"]["CH1"] = self.data["unfiltered"]["CH1"].copy()
-            self.data["user"]["CH0"]["TOF"] = calc_TOF(
-                self.data["user"]["CH1"]["TIMETAG"],
-                self.data["user"]["CH0"]["TIMETAG"],
+        if "TOF" not in self.data["user"][self.ch_signal]:
+            # copy all of pulse data
+            self.data["user"][self.ch_pulse] = self.data["unfiltered"][self.ch_pulse].copy()
+            self.data["user"][self.ch_signal]["TOF"] = calc_TOF(
+                self.data["user"][self.ch_pulse]["TIMETAG"],
+                self.data["user"][self.ch_signal]["TIMETAG"],
             )
         print(
             "Successfully performed user energy cut of TOF spectrum "
@@ -625,14 +658,17 @@ class CompassRun:
 
     def plot_tof(
         self,
-        filtered="unfiltered",
+        filtered="filtered",
         t_lo=0.0,
         t_hi=200.0,
         n_bins=400,
-        color="blue",
+        color=None,
         label=None,
         norm=True,
         add=False,
+        plot_hist=True,
+        plot_kde=False,
+        bg_correct=True,
     ):
         """Plot manually calculated TOF spectrum.
 
@@ -654,42 +690,86 @@ class CompassRun:
                 whether to normalize data by measurement time
             add : bool
                 whether to add plot to existing figure
+            plot_kde : bool
+                whether to plot KDE of counts
         """
-        if ("CH0" in self.data[filtered]) and (
-            self.data[filtered]["CH0"].size >= 0
+        if (self.ch_signal in self.data[filtered]) and (
+            self.data[filtered][self.ch_signal].size >= 0
         ):
             try:
-                x = self.data[filtered]["CH0"].TOF
+                x = self.data[filtered][self.ch_signal].TOF
             except:
                 print(f"No TOF data to plot for {self.key}!")
                 return
             if not add:
                 plt.figure(figsize=(16, 9))
             if norm:
-                weights = [1 / self.t_meas] * len(x)
-                plt.ylabel("COUNTS/MINUTE")
+                weight = 1 / self.t_meas / ((t_hi - t_lo) / n_bins)
+                weights = [weight] * len(x)
+                plt.ylabel("COUNTS/MINUTE [NORM.]", labelpad=10)
             else:
                 weights = [1] * len(x)
                 plt.ylabel("COUNTS")
             if label is None:
-                label = (self.key + " " + filtered).replace("_", "-")
-            plt.hist(
-                x,
-                range=[t_lo, t_hi],
-                bins=n_bins,
-                weights=weights,
-                histtype="step",
-                lw=2,
-                color=color,
-                label=label,
+                label = (f"{self.key} {filtered}").replace("_", "-")
+            # plt.hist(
+            #     x,
+            #     range=[t_lo, t_hi],
+            #     bins=n_bins,
+            #     weights=weights,
+            #     histtype="step",
+            #     lw=2,
+            #     color=color,
+            #     label=label,
+            # )
+            t_res = (t_hi - t_lo) / n_bins
+            hist_vals_raw, bin_edges = np.histogram(
+                x, range=[t_lo, t_hi], bins=n_bins
             )
+            errs = np.sqrt(hist_vals_raw) * weight
+            hist_vals = hist_vals_raw * weight
+            bin_centers = bin_edges[:-1] + t_res / 2
+            if bg_correct:
+                y = hist_vals - f_exponential(bin_centers, *popt)
+            else:
+                y = hist_vals
+            if plot_hist:
+                plt.errorbar(
+                    x=bin_centers,
+                    y=y,
+                    yerr=errs,
+                    elinewidth=1,
+                    capsize=2,
+                    drawstyle="steps-mid",
+                    lw=2,
+                    color=color,
+                    label=label,
+                )
+            if plot_kde:
+                t_lin = np.linspace(t_lo, t_hi, int((t_hi - t_lo) / 0.1) + 1)
+                data_kde = self.data[self.kde_filtered][self.ch_signal].TOF
+                kde_eval = (
+                    self.kde.evaluate(t_lin) * len(data_kde) / self.t_meas
+                )
+                if bg_correct:
+                    y = kde_eval - f_exponential(t_lin, *popt)
+                else:
+                    y = kde_eval
+                plt.plot(
+                    t_lin,
+                    y,
+                    color=color,
+                    lw=3,
+                    label=label + " (KDE)",
+                    zorder=10,
+                )
             plt.xlim(t_lo, t_hi)
             plt.yscale("log")
             plt.legend(loc="upper right")
-            plt.xlabel("TIME (us)")
+            plt.xlabel(r"TIME [$\mu$s]", labelpad=10)
             # plt.tight_layout()
         else:
-            print(f"No {filtered} CH0 data found for {self.key}!")
+            print(f"No {filtered} {self.ch_signal} data found for {self.key}!")
 
     def plot_spectrum(self, mode="TOF", filtered="unfiltered", add=False):
         """Plot spectrum auto-generated by CoMPASS.
@@ -719,7 +799,7 @@ class CompassRun:
             yerr=[np.sqrt(i) for i in y],
             capsize=2,
             drawstyle="steps-mid",
-            label=self.key + " " + filtered,
+            label=f"{self.key} {filtered}",
         )
         plt.ylabel("COUNTS")
         plt.ylim(bottom=1)
@@ -767,19 +847,27 @@ class CompassRun:
         )
         return hist, bin_edges
 
+    def add_kde(self, filtered="filtered", kde_bw=0.01):
+        """Add KDE for filtered counts."""
+        data = self.data[filtered][self.ch_signal]["TOF"]
+        kde_in = gaussian_kde(data, bw_method=kde_bw)
+        self.kde = kde_in
+        self.kde_filtered = filtered
+
     def add_trans(
         self,
         runs,
         key_open,
         filtered="filtered",
+        kde_bw=0.01,
         t_lo=0.0,
         t_hi=200.0,
         n_bins=600,
         t_offset=5.56,
     ):
         """Add neutron transmission values and errors."""
-        target_in = self.data[filtered]["CH0"]["TOF"]
-        target_out = runs[key_open].data[filtered]["CH0"]["TOF"]
+        target_in = self.data[filtered][self.ch_signal]["TOF"]
+        target_out = runs[key_open].data[filtered][self.ch_signal]["TOF"]
         t_meas_in = self.t_meas
         t_meas_out = runs[key_open].t_meas
         counts_in, __ = np.histogram(
@@ -797,8 +885,21 @@ class CompassRun:
         self.bins_trans = bins
         self.trans = trans
         self.errs_trans = errs_trans
+        kde_in = gaussian_kde(target_in, bw_method=kde_bw)
+        kde_out = gaussian_kde(target_out, bw_method=kde_bw)
+        t_lin = np.linspace(t_lo, t_hi, int((t_hi - t_lo) / 0.1) + 1)
+        trans_kde, __ = calc_trans(
+            kde_in.evaluate(t_lin) * len(target_in),
+            kde_out.evaluate(t_lin) * len(target_out),
+            t_meas_in,
+            t_meas_out,
+        )
+        self.trans_tlin = t_lin
+        self.trans_kde = trans_kde
 
-    def plot_trans(self, t_offset=0.0, color="black", add_plot=False):
+    def plot_trans(
+        self, t_offset=0.0, plot_kde=False, color="black", add_plot=False
+    ):
         """Plot transmission."""
         if not add_plot:
             plt.figure(figsize=(16, 9))
@@ -806,13 +907,22 @@ class CompassRun:
             x=self.bins_trans,
             y=self.trans,
             yerr=self.errs_trans,
-            lw=2,
+            lw=1,
             drawstyle="steps-mid",
             elinewidth=0.5,
             capsize=1,
             color=color,
             label=self.key,
         )
+        if plot_kde:
+            plt.plot(
+                self.trans_tlin - t_offset,
+                self.trans_kde,
+                lw=3,
+                color="blue",
+                label=self.key + " (KDE)",
+                zorder=10,
+            )
         plt.xlim(
             [
                 max(t_offset, max(0, self.bins_trans[0])),
@@ -1014,7 +1124,7 @@ def process_runs(key_tuples, runs=None):
     )
     for (key, folder) in key_tuples:
         if key != "CoMPASS":
-            print("\n" + f"Processing Key: {key}")
+            print(f"\nProcessing Key: {key}")
             run = CompassRun(key=key, folder=folder)
             err = run.read_settings()
             if err == -1:
