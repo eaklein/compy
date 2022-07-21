@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="compy",
-    version="1.0",
+    version="1.0.1",
     author="E. A. Klein",
     author_email="eklein@mit.edu",
     description="A package for reading CoMPASS directories into Python",
