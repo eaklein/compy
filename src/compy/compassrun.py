@@ -104,7 +104,7 @@ class CompassRun:
         ch_signal=4,
         ch_pulse=5,
         file_fmt="csv",
-        folder="C:/Users/Avram/Dropbox (MIT)/Resonances/data/CoMPASS/",
+        folder=Path().resolve()
     ):
         """Construct all the necessary attributes for the compassRun class.
 
