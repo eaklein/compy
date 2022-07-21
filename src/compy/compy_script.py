@@ -117,5 +117,5 @@ def main():
 
 
 if __name__ == "__main__":
-    os.chdir("/mnt/c/Users/Avram/Dropbox (MIT)/MIT/research/NRTA/experiments/")
+    os.chdir(Path.cwd())
     runs = main()

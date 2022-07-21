@@ -101,9 +101,9 @@ class CompassRun:
         spectra=None,
         data=None,
         t_meas=0.0,
-        ch_signal=4,
-        ch_pulse=5,
-        file_fmt="csv",
+        ch_signal=0,
+        ch_pulse=1,
+        file_fmt=".csv",
         folder=Path().resolve()
     ):
         """Construct all the necessary attributes for the compassRun class.
@@ -167,7 +167,7 @@ class CompassRun:
                 ]
             )
             self.t_meas /= 1000 * 60
-            self.file_fmt = settings_xml["configuration"][
+            self.file_fmt = "." + settings_xml["configuration"][
                 "acquisitionMemento"
             ]["fileFormatList"]
         except FileNotFoundError:
@@ -201,8 +201,8 @@ class CompassRun:
             float(self.settings["SW_PARAMETER_PSDBINCOUNT"])
         )
         # read files from run directory
-        print("Reading files from directory.")
-        file_fmt = self.file_fmt
+        print("Reading files from directory...")
+        file_fmt = self.file_fmt.lower()
         for filt_key in ["unfiltered", "filtered"]:
             filt_upper = filt_key.upper()
             self.params[filt_key] = {}
@@ -215,36 +215,34 @@ class CompassRun:
                 )
                 break
             # read raw signal channel data location
-            # [print(str(file)) for file in
-            #  Path(folder_filt).glob('*' + file_fmt)]
             self.params[filt_key][f"file_{self.ch_signal}"] = [
-                str(file)
-                for file in Path(folder_filt).glob(f"*{file_fmt}")
-                if self.ch_signal in str(file)
+                str(file.name)
+                for file in Path(folder_filt).glob("*")
+                if (self.ch_signal in str(file)) and (file.suffix.lower() == file_fmt)
             ]
             # read raw pulse data location
             self.params[filt_key][f"file_{self.ch_pulse}"] = [
-                str(file)
-                for file in Path(folder_filt).glob(f"*{file_fmt}")
-                if self.ch_pulse in str(file)
+                str(file.name)
+                for file in Path(folder_filt).glob("*")
+                if (self.ch_pulse in str(file)) and (file.suffix.lower() == file_fmt)
             ]
             # read saved TOF spectra location
             self.params[filt_key]["file_data_TOF"] = [
-                str(file)
-                for file in Path(folder_filt).glob(f"*{file_fmt}")
-                if "TOF" in str(file)
+                str(file.name)
+                for file in Path(folder_filt).glob("*")
+                if ("TOF" in str(file)) and (file.suffix.lower() == file_fmt)
             ]
             # read saved E spectra location
             self.params[filt_key]["file_data_E"] = [
-                str(file)
-                for file in Path(folder_filt).glob(f"*{file_fmt}")
-                if (self.ch_signal in str(file)) and ("E" in str(file))
+                str(file.name)
+                for file in Path(folder_filt).glob("*")
+                if (self.ch_signal in str(file)) and ("E" in str(file)) and (file.suffix.lower() == file_fmt)
             ]
             # read saved PSD spectra location
             self.params[filt_key]["file_data_PSD"] = [
-                str(file)
-                for file in Path(folder_filt).glob(f"*{file_fmt}")
-                if (self.ch_signal in str(file)) and ("PSD" in str(file))
+                str(file.name)
+                for file in Path(folder_filt).glob("*")
+                if (self.ch_signal in str(file)) and ("PSD" in str(file)) and (file.suffix.lower() == file_fmt)
             ]
 
     def read_spectra(
@@ -386,11 +384,11 @@ class CompassRun:
                         / filt_key.upper()
                         / self.params[filt_key][f"file_{self.ch_signal}"][0]
                     )
-                    if file_fmt == "csv":
+                    if file_fmt == ".csv":
                         self.data[filt_key][self.ch_signal] = pd.read_csv(
                             fname, sep=";", on_bad_lines="skip"
                         )
-                    elif file_fmt == "bin":
+                    elif file_fmt == ".bin":
                         with open(fname, "rb") as f:
                             byte = f.read()
                         data = struct.unpack(
@@ -424,11 +422,11 @@ class CompassRun:
                         / filt_key.upper()
                         / self.params[filt_key][f"file_{self.ch_pulse}"][0]
                     )
-                    if file_fmt == "csv":
+                    if file_fmt == ".csv":
                         self.data[filt_key][self.ch_pulse] = pd.read_csv(
                             fname, sep=";", on_bad_lines="skip"
                         )
-                    elif file_fmt == "bin":
+                    elif file_fmt == ".bin":
                         with open(fname, "rb") as f:
                             byte = f.read()
                         data = struct.unpack(
@@ -490,11 +488,11 @@ class CompassRun:
                     fname = self.params[filt_key][f"file_{self.ch_pulse}"][0]
                     file_fmt = self.file_fmt.lower()
                     try:
-                        if file_fmt == "csv":
+                        if file_fmt == ".csv":
                             self.data[filt_key][self.ch_pulse] = pd.read_csv(
                                 fname, sep=";", on_bad_lines="skip"
                             )
-                        elif file_fmt == "bin":
+                        elif file_fmt == ".bin":
                             with open(fname, "rb") as f:
                                 byte = f.read()
                             data = struct.unpack(
@@ -569,7 +567,7 @@ class CompassRun:
         for filt_key in filtered:
             # check if un-/filtered signal data present and TOF not yet calculated
             if self.ch_signal not in self.data[filt_key]:
-                print("Could not calculate PSD. Ch.0 data not found!")
+                print(f"Could not calculate PSD. CH{self.ch_signal} data not found!")
             elif (self.ch_signal in self.data[filt_key]) and (
                 "PSD" in self.data[filt_key][self.ch_signal]
             ):
@@ -609,7 +607,7 @@ class CompassRun:
                             print("ERROR: issue arose writing PSD to file.")
                             break
                 else:
-                    print("ERROR: Ch.0 data empty.")
+                    print(f"ERROR: CH. {self.ch_signal} data empty.")
 
     def user_filter(self, e_lo=95, e_hi=135, prompt=False):
         """Perform user cut of energy spectrum.
@@ -1045,7 +1043,7 @@ def select_keys(folders):
             keys_new = [(key, folder) for key in keys_folder]
             keys_select.extend(keys_new)
             continue
-        # manually select runs
+        # select runs by date
         bool_date = click.confirm(
             "\nWould you like to process by date?", default=False
         )
@@ -1078,6 +1076,7 @@ def select_keys(folders):
                         (key, folder) not in keys_select
                     ):
                         keys_select.append((key, folder))
+        # manually select runs
         while True:
             n_keys = len(keys_select)
             key_input = input(
