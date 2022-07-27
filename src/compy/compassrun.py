@@ -4,7 +4,6 @@ Created on Tue Oct 26 11:46:40 2021
 @author: E. A. Klein
 """
 
-import struct
 from pprint import pprint
 from pathlib import Path
 
@@ -15,7 +14,7 @@ import click
 import xmltodict
 from scipy.stats import gaussian_kde
 
-from compy.utilities import calc_TOF, calc_trans
+from compy.utilities import calc_TOF, calc_trans, read_binary
 
 # set plotting environment
 plt.close("all")
@@ -33,7 +32,8 @@ def f_exponential(t, b, tau):
 
 
 # parameters for exponential background fit (counts/minute for 500ns bins)
-popt = [ 12.77513472, 185.06506026]
+popt = [12.77513472, 185.06506026]
+
 
 class CompassRun:
     """
@@ -55,6 +55,10 @@ class CompassRun:
         un-/filtered data acquired and stored by CoMPASS
     t_meas : float
         acquisition time in minutes
+    ch_signal : int
+        board channel for detector
+    ch_pulse : int
+        board channel for pulser
     file_fmt : string
         file format of saved CoMPASS data (e.g., csv, bin)
     bins_trans : array
@@ -150,7 +154,7 @@ class CompassRun:
             self.params = {}
         for filt_key in ["unfiltered", "filtered"]:
             self.params[filt_key] = {}
-        
+
         try:
             xml_fname = Path(self.folder) / self.key / "settings.xml"
             with open(xml_fname) as f:
@@ -378,6 +382,7 @@ class CompassRun:
                     end="",
                 )
                 try:
+                    # attempt to read in csv or binary data (ROOT not supported)
                     fname = (
                         Path(self.folder)
                         / self.key
@@ -389,15 +394,8 @@ class CompassRun:
                             fname, sep=";", on_bad_lines="skip"
                         )
                     elif file_fmt == ".bin":
-                        with open(fname, "rb") as f:
-                            byte = f.read()
-                        data = struct.unpack(
-                            ("<" + "HHQHHII" * (len(byte) // 24)), byte
-                        )
-                        self.data[filt_key][self.ch_signal] = pd.DataFrame(
-                            np.reshape(np.array(data), [-1, 7])[:, 2:5],
-                            columns=["TIMETAG", "ENERGY", "ENERGYSHORT"],
-                        )
+                        self.data[filt_key][self.ch_signal] = read_binary(
+                            fname)
                     if self.data[filt_key][self.ch_signal].empty:
                         print("file was empty.")
                     else:
@@ -408,7 +406,7 @@ class CompassRun:
                         f"for {self.key}."
                     )
                     continue
-                # attempt to read Ch.1 (pulse) data if TOF not yet calculated
+                # attempt to read pulse data (default CH1) if TOF not yet calculated
                 if "TOF" in self.data[filt_key][self.ch_signal]:
                     continue
                 if len(self.params[filt_key]["file_" + self.ch_pulse]) > 0:
@@ -416,6 +414,7 @@ class CompassRun:
                         f"Reading {filt_key} {self.ch_pulse} data for key: {self.key}...",
                         end="",
                     )
+                    # attempt to read in csv or binary data (ROOT not supported)
                     fname = (
                         Path(self.folder)
                         / self.key
@@ -427,15 +426,7 @@ class CompassRun:
                             fname, sep=";", on_bad_lines="skip"
                         )
                     elif file_fmt == ".bin":
-                        with open(fname, "rb") as f:
-                            byte = f.read()
-                        data = struct.unpack(
-                            ("<" + "HHQHHII" * (len(byte) // 24)), byte
-                        )
-                        self.data[filt_key][self.ch_pulse] = pd.DataFrame(
-                            np.reshape(np.array(data), [-1, 7])[:, 2:5],
-                            columns=["TIMETAG", "ENERGY", "ENERGYSHORT"],
-                        )
+                        self.data[filt_key][self.ch_pulse] = read_binary(fname)
                     if self.data[filt_key][self.ch_pulse].empty:
                         print("no data found.")
                     else:
@@ -481,27 +472,21 @@ class CompassRun:
                     (self.ch_pulse not in self.data[filt_key])
                     or self.data[filt_key][self.ch_pulse].empty
                 ):
-                    print(f"Reading {filt_key} {self.ch_pulse} data for key: {self.key}.")
+                    print(
+                        f"Reading {filt_key} {self.ch_pulse} data for key: {self.key}.")
                     print(self.params[filt_key][f"file_{self.ch_pulse}"][0])
-                    # fname = (Path(self.folder) / self.key / filt_key.upper()
-                    #          / self.params[filt_key]['file_' + self.ch_pulse][0])
-                    fname = self.params[filt_key][f"file_{self.ch_pulse}"][0]
+                    fname = (Path(self.folder) / self.key / filt_key.upper()
+                             / self.params[filt_key]['file_' + self.ch_pulse][0])
                     file_fmt = self.file_fmt.lower()
                     try:
+                        # attempt to read in csv or binary data (ROOT not supported)
                         if file_fmt == ".csv":
                             self.data[filt_key][self.ch_pulse] = pd.read_csv(
                                 fname, sep=";", on_bad_lines="skip"
                             )
                         elif file_fmt == ".bin":
-                            with open(fname, "rb") as f:
-                                byte = f.read()
-                            data = struct.unpack(
-                                ("<" + "HHQHHII" * (len(byte) // 24)), byte
-                            )
-                            self.data[filt_key][self.ch_pulse] = pd.DataFrame(
-                                np.reshape(np.array(data), [-1, 7])[:, 2:5],
-                                columns=["TIMETAG", "ENERGY", "ENERGYSHORT"],
-                            )
+                            self.data[filt_key][self.ch_pulse] = read_binary(
+                                fname)
                     except:
                         print(
                             f"ERROR: unable to read in {filt_key} {self.ch_pulse} data "
@@ -567,7 +552,8 @@ class CompassRun:
         for filt_key in filtered:
             # check if un-/filtered signal data present and TOF not yet calculated
             if self.ch_signal not in self.data[filt_key]:
-                print(f"Could not calculate PSD. CH{self.ch_signal} data not found!")
+                print(
+                    f"Could not calculate PSD. CH{self.ch_signal} data not found!")
             elif (self.ch_signal in self.data[filt_key]) and (
                 "PSD" in self.data[filt_key][self.ch_signal]
             ):
@@ -1118,13 +1104,32 @@ def process_runs(key_tuples, runs=None):
     """Read in settings, spectra, and data for specified runs."""
     if runs is None:
         runs = {}
+    # enable variable signal/pulse channels
+    ch_flag = click.confirm(
+        f"Would you like to use default channels for signal (CH.0) and pulse (CH.1)?", default="Y"
+    )
+    if not ch_flag:
+        while True:
+            ch_signal_raw = input(
+                "Which is the detector channel?"
+            )
+            ch_pulse_raw = input(
+                "Which is the pulser channel?"
+            )
+            if ch_signal_raw.isdigit() and ch_pulse_raw.isdigit():
+                ch_signal = int(ch_signal_raw)
+                ch_pulse = int(ch_pulse_raw)
+                break
+            else:
+                print("Please ensure both channels are integer values.")
     bool_TOF = click.confirm(
         "Would you like to manually calculate TOF?", default="Y"
     )
     for (key, folder) in key_tuples:
         if key != "CoMPASS":
             print(f"\nProcessing Key: {key}")
-            run = CompassRun(key=key, folder=folder)
+            run = CompassRun(key=key, folder=folder,
+                             ch_signal=ch_signal, ch_pulse=ch_pulse)
             err = run.read_settings()
             if err == -1:
                 continue
